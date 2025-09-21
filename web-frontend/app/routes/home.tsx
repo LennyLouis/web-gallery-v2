@@ -1,13 +1,21 @@
+import { useEffect } from "react";
+import { useNavigate } from "react-router";
 import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "Les photos de Lenny" },
+    { name: "description", content: "Plateforme sécurisée de partage de photos professionnelles" },
   ];
 }
 
 export default function Home() {
-  return <Welcome />;
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Redirection côté client pour le mode SPA
+    navigate("/login", { replace: true });
+  }, [navigate]);
+
+  return null;
 }
