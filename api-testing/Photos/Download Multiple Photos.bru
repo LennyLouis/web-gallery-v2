@@ -1,0 +1,40 @@
+meta {
+  name: Download Multiple Photos
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{apiUrl}}/photos/download
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "photoIds": ["{{testPhotoId}}"]
+  }
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return photos with download URLs", function() {
+    expect(res.getBody().photos).to.be.an('array');
+  });
+
+  test("should have download structure", function() {
+    if (res.getBody().photos.length > 0) {
+      const photo = res.getBody().photos[0];
+      expect(photo.id).to.be.a('string');
+      expect(photo.filename).to.be.a('string');
+      expect(photo.download_url).to.be.a('string');
+    }
+  });
+}

@@ -1,0 +1,31 @@
+meta {
+  name: Validate Access Link
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{apiUrl}}/access-links/validate/{{testAccessToken}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should confirm link is valid", function() {
+    expect(res.getBody().valid).to.equal(true);
+  });
+
+  test("should return album info", function() {
+    expect(res.getBody().album).to.be.an('object');
+    expect(res.getBody().album.title).to.be.a('string');
+  });
+
+  test("should return access link info", function() {
+    expect(res.getBody().access_link).to.be.an('object');
+    expect(res.getBody().access_link.token).to.equal(bru.getEnvVar("testAccessToken"));
+  });
+}

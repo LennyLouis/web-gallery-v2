@@ -1,0 +1,33 @@
+meta {
+  name: Get Profile
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{apiUrl}}/auth/profile
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return user profile", function() {
+    expect(res.getBody().user).to.be.an('object');
+    expect(res.getBody().user.email).to.be.a('string');
+    expect(res.getBody().user.role).to.be.a('string');
+  });
+
+  test("should have required fields", function() {
+    const user = res.getBody().user;
+    expect(user.id).to.be.a('string');
+    expect(user.created_at).to.be.a('string');
+  });
+}

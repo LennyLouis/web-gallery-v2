@@ -1,0 +1,39 @@
+meta {
+  name: Update Album
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{apiUrl}}/albums/{{testAlbumId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "title": "Mon Album Modifié",
+    "description": "Description mise à jour",
+    "is_public": true,
+    "tags": ["updated", "test", "public"]
+  }
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return updated album", function() {
+    expect(res.getBody().album.title).to.equal('Mon Album Modifié');
+    expect(res.getBody().album.is_public).to.equal(true);
+  });
+
+  test("should have updated timestamp", function() {
+    expect(res.getBody().album.updated_at).to.be.a('string');
+  });
+}

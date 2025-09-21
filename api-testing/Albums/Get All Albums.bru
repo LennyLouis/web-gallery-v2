@@ -1,0 +1,34 @@
+meta {
+  name: Get All Albums
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{apiUrl}}/albums
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return albums array", function() {
+    expect(res.getBody().albums).to.be.an('array');
+  });
+
+  test("should have album structure", function() {
+    if (res.getBody().albums.length > 0) {
+      const album = res.getBody().albums[0];
+      expect(album.id).to.be.a('string');
+      expect(album.title).to.be.a('string');
+      expect(album.owner_id).to.be.a('string');
+    }
+  });
+}

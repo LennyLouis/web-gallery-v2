@@ -1,0 +1,35 @@
+meta {
+  name: Get All Access Links
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{apiUrl}}/access-links
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return access links array", function() {
+    expect(res.getBody().access_links).to.be.an('array');
+  });
+
+  test("should have link structure", function() {
+    if (res.getBody().access_links.length > 0) {
+      const link = res.getBody().access_links[0];
+      expect(link.id).to.be.a('string');
+      expect(link.token).to.be.a('string');
+      expect(link.album_title).to.be.a('string');
+      expect(link.is_valid).to.be.a('boolean');
+    }
+  });
+}

@@ -1,0 +1,48 @@
+meta {
+  name: Create Access Link
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{apiUrl}}/access-links
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "album_id": "{{testAlbumId}}",
+    "expires_at": "2025-12-31T23:59:59.000Z",
+    "max_uses": 10
+  }
+}
+
+tests {
+  test("should return 201", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+
+  test("should return access link", function() {
+    expect(res.getBody().access_link).to.be.an('object');
+    expect(res.getBody().access_link.token).to.be.a('string');
+  });
+
+  test("should have correct properties", function() {
+    const link = res.getBody().access_link;
+    expect(link.album_id).to.equal(bru.getEnvVar("testAlbumId"));
+    expect(link.max_uses).to.equal(10);
+    expect(link.is_active).to.equal(true);
+  });
+}
+
+script:post-response {
+  if (res.getBody().access_link && res.getBody().access_link.token) {
+    bru.setEnvVar("testAccessToken", res.getBody().access_link.token);
+    bru.setEnvVar("testAccessLinkId", res.getBody().access_link.id);
+  }
+}

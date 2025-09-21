@@ -1,0 +1,38 @@
+meta {
+  name: Register User
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{apiUrl}}/auth/register
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "email": "newuser@example.com",
+    "password": "password123",
+    "role": "user"
+  }
+}
+
+tests {
+  test("should return 201 for successful registration", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  
+  test("should return user data", function() {
+    expect(res.getBody().user.email).to.equal('newuser@example.com');
+    expect(res.getBody().user.role).to.equal('user');
+  });
+  
+  test("should have user id", function() {
+    expect(res.getBody().user.id).to.be.a('string');
+  });
+}

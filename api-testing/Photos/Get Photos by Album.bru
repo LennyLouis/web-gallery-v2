@@ -1,0 +1,35 @@
+meta {
+  name: Get Photos by Album
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{apiUrl}}/photos/album/{{testAlbumId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return photos array", function() {
+    expect(res.getBody().photos).to.be.an('array');
+  });
+
+  test("should have photo structure with URLs", function() {
+    if (res.getBody().photos.length > 0) {
+      const photo = res.getBody().photos[0];
+      expect(photo.id).to.be.a('string');
+      expect(photo.filename).to.be.a('string');
+      expect(photo.download_url).to.be.a('string');
+      expect(photo.preview_url).to.be.a('string');
+    }
+  });
+}

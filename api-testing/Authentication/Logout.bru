@@ -1,0 +1,31 @@
+meta {
+  name: Logout
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{apiUrl}}/auth/logout
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return success message", function() {
+    expect(res.getBody().message).to.equal('Logout successful');
+  });
+}
+
+script:post-response {
+  // Clear tokens after logout
+  bru.setEnvVar("accessToken", "");
+  bru.setEnvVar("refreshToken", "");
+}

@@ -1,0 +1,46 @@
+meta {
+  name: Upload Photos
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{apiUrl}}/photos/upload/{{testAlbumId}}
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:multipart-form {
+  files: @file(/Users/lenny/Projets vidéo/2025-09-13 Anniv juline chez Martin/Photos retouchés/Anniv-Juline-13-09-2025-18.jpg)
+}
+
+script:post-response {
+  if (res.getBody().photos && res.getBody().photos.length > 0) {
+    bru.setEnvVar("testPhotoId", res.getBody().photos[0].id);
+  }
+}
+
+tests {
+  test("should return 201", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  
+  test("should return upload results", function() {
+    expect(res.getBody().uploaded).to.be.a('number');
+    expect(res.getBody().photos).to.be.an('array');
+  });
+  
+  test("should have processed photos", function() {
+    if (res.getBody().photos.length > 0) {
+      const photo = res.getBody().photos[0];
+      expect(photo.id).to.be.a('string');
+      expect(photo.filename).to.be.a('string');
+      expect(photo.file_path).to.be.a('string');
+      expect(photo.preview_path).to.be.a('string');
+    }
+  });
+}

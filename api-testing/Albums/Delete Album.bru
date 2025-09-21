@@ -1,0 +1,33 @@
+meta {
+  name: Delete Album
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{apiUrl}}/albums/{{testAlbumId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return success message", function() {
+    expect(res.getBody().message).to.equal('Album deleted successfully');
+  });
+}
+
+script:post-response {
+  // Clear test variables after deletion
+  bru.setEnvVar("testAlbumId", "");
+  bru.setEnvVar("testAccessToken", "");
+  bru.setEnvVar("testAccessLinkId", "");
+  bru.setEnvVar("testPhotoId", "");
+}

@@ -1,0 +1,50 @@
+meta {
+  name: Create Album
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{apiUrl}}/albums
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "title": "Mon Premier Album",
+    "description": "Album de test créé via Bruno",
+    "date": "2024-01-15",
+    "tags": ["test", "bruno", "api"],
+    "location": "Paris, France",
+    "is_public": false
+  }
+}
+
+tests {
+  test("should return 201", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+
+  test("should return album data", function() {
+    expect(res.getBody().album).to.be.an('object');
+    expect(res.getBody().album.title).to.equal('Mon Premier Album');
+  });
+
+  test("should have required fields", function() {
+    const album = res.getBody().album;
+    expect(album.id).to.be.a('string');
+    expect(album.owner_id).to.be.a('string');
+    expect(album.created_at).to.be.a('string');
+  });
+}
+
+script:post-response {
+  if (res.getBody().album && res.getBody().album.id) {
+    bru.setEnvVar("testAlbumId", res.getBody().album.id);
+  }
+}

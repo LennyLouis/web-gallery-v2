@@ -1,0 +1,27 @@
+meta {
+  name: Get Public Albums
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{apiUrl}}/albums/public
+  body: none
+  auth: none
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("should return albums array", function() {
+    expect(res.getBody().albums).to.be.an('array');
+  });
+
+  test("all albums should be public", function() {
+    res.getBody().albums.forEach(album => {
+      expect(album.is_public).to.equal(true);
+    });
+  });
+}

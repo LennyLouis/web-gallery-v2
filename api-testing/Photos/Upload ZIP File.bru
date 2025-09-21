@@ -1,0 +1,45 @@
+meta {
+  name: Upload ZIP File
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{apiUrl}}/photos/upload/{{testAlbumId}}
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:multipart-form {
+  files: @file(/path/to/your/photos.zip)
+}
+
+tests {
+  test("should return 201", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+
+  test("should return upload results", function() {
+    expect(res.getBody().uploaded).to.be.a('number');
+    expect(res.getBody().photos).to.be.an('array');
+  });
+
+  test("should have processed photos from ZIP", function() {
+    if (res.getBody().photos.length > 0) {
+      const photo = res.getBody().photos[0];
+      expect(photo.id).to.be.a('string');
+      expect(photo.filename).to.be.a('string');
+      expect(photo.file_path).to.include('/pictures/');
+      expect(photo.preview_path).to.include('/previews/');
+    }
+  });
+
+  test("should show extraction stats", function() {
+    expect(res.getBody().message).to.equal('Files uploaded successfully');
+    console.log(`Extracted ${res.getBody().uploaded} images from ZIP`);
+  });
+}
