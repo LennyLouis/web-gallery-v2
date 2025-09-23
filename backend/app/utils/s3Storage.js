@@ -14,6 +14,17 @@ class S3Storage {
       forcePathStyle: config.storage.s3.forcePathStyle,
     });
 
+    // Client S3 séparé pour les URLs signées avec endpoint public
+    this.s3PublicClient = new S3Client({
+      endpoint: config.storage.s3.publicEndpoint,
+      region: config.storage.s3.region,
+      credentials: {
+        accessKeyId: config.storage.s3.accessKeyId,
+        secretAccessKey: config.storage.s3.secretAccessKey,
+      },
+      forcePathStyle: config.storage.s3.forcePathStyle,
+    });
+
     this.bucket = config.storage.s3.bucket;
   }
 
@@ -55,7 +66,7 @@ class S3Storage {
     }
   }
 
-  // Générer une URL signée pour téléchargement
+  // Générer une URL signée pour téléchargement (utilise l'endpoint public)
   async getSignedUrl(key, expiresIn = 3600) {
     try {
       const command = new GetObjectCommand({
@@ -63,7 +74,7 @@ class S3Storage {
         Key: key,
       });
 
-      const url = await getSignedUrl(this.s3Client, command, { expiresIn });
+      const url = await getSignedUrl(this.s3PublicClient, command, { expiresIn });
       return url;
     } catch (error) {
       console.error('S3 GetSignedUrl error:', error);
@@ -71,9 +82,9 @@ class S3Storage {
     }
   }
 
-  // URL publique pour les previews
+  // URL publique pour les previews (utilise l'endpoint public)
   getPublicUrl(key) {
-    return `${config.storage.s3.endpoint}/${this.bucket}/${key}`;
+    return `${config.storage.s3.publicEndpoint}/${this.bucket}/${key}`;
   }
 
   // Vérifier si un fichier existe

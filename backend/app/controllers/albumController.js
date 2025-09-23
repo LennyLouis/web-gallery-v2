@@ -35,12 +35,15 @@ const albumController = {
   async getAll(req, res) {
     try {
       const user_id = req.user.id;
+      console.log(`📁 [${new Date().toISOString()}] Getting albums for user: ${user_id}`);
       
       // Get albums owned by the user
       const ownedAlbums = await Album.findByOwner(user_id);
+      console.log(`📁 Found ${ownedAlbums.length} owned albums:`, ownedAlbums.map(a => ({ id: a.id, title: a.title })));
       
       // Get albums user has permission to access
       const userPermissions = await UserAlbumPermission.findByUser(user_id);
+      console.log(`🔐 Found ${userPermissions.length} permission records`);
       
       // Get the albums from permissions that are not already in owned albums
       const permissionAlbumIds = userPermissions.map(p => p.album_id);
@@ -72,6 +75,7 @@ const albumController = {
       
       // Combine owned and permitted albums
       const allAlbums = [...ownedAlbums, ...permissionAlbums];
+      console.log(`📁 Returning ${allAlbums.length} total albums`);
 
       res.json({ albums: allAlbums });
 

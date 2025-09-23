@@ -4,6 +4,7 @@ const UserAlbumPermission = require('../models/UserAlbumPermission');
 const { supabase, supabaseAdmin } = require('../config/database');
 const s3Storage = require('../utils/s3Storage');
 const archiver = require('archiver');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
 
 const photoController = {
   async upload(req, res) {
@@ -301,19 +302,61 @@ const photoController = {
         return res.status(403).json({ error: 'No accessible photos found' });
       }
 
-      // Si c'est une seule photo, rediriger vers le téléchargement direct
+      // Si c'est une seule photo, faire un téléchargement direct
       if (accessiblePhotos.length === 1) {
         const photo = accessiblePhotos[0];
-        const downloadUrl = await photo.getDownloadUrl();
-        return res.json({
-          single_photo: true,
-          download_url: downloadUrl,
-          filename: photo.original_name || photo.filename
-        });
+        
+        try {
+          // Obtenir le stream du fichier depuis S3
+          const s3Key = s3Storage.getPhotoPath(photo.album_id, photo.filename);
+          
+          const command = new GetObjectCommand({
+            Bucket: s3Storage.bucket,
+            Key: s3Key
+          });
+
+          const response = await s3Storage.s3Client.send(command);
+          
+          // Définir les headers pour le téléchargement direct
+          const originalName = photo.original_name || photo.filename;
+          const extension = originalName.split('.').pop() || 'jpg';
+          const filename = originalName.includes('.') ? originalName : `${originalName}.${extension}`;
+          
+          res.setHeader('Content-Type', response.ContentType || 'image/jpeg');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          
+          if (response.ContentLength) {
+            res.setHeader('Content-Length', response.ContentLength);
+          }
+
+          // Convertir le stream AWS SDK v3 en Node.js stream
+          const { Readable } = require('stream');
+          
+          if (response.Body instanceof Readable) {
+            // Si c'est déjà un stream Node.js
+            response.Body.pipe(res);
+          } else {
+            // Pour AWS SDK v3, Body peut être un ReadableStream web
+            const nodeStream = Readable.fromWeb(response.Body);
+            nodeStream.pipe(res);
+          }
+          
+          return;
+          
+        } catch (error) {
+          console.error('Error downloading single photo:', error);
+          // Fallback vers l'URL signée si le streaming direct échoue
+          const downloadUrl = await photo.getDownloadUrl();
+          return res.json({
+            single_photo: true,
+            download_url: downloadUrl,
+            filename: photo.original_name || photo.filename
+          });
+        }
       }
 
       // Pour plusieurs photos, créer un ZIP
-      const { Readable } = require('stream');
+      console.log(`📦 Creating ZIP archive for ${accessiblePhotos.length} photos`);
       
       // Créer l'archive ZIP
       const archive = archiver('zip', {
@@ -326,6 +369,10 @@ const photoController = {
         if (!res.headersSent) {
           res.status(500).json({ error: 'Archive creation failed' });
         }
+      });
+
+      archive.on('warning', (err) => {
+        console.warn('Archive warning:', err);
       });
 
       // Définir les headers pour le téléchargement
@@ -342,13 +389,16 @@ const photoController = {
       // Ajouter chaque photo à l'archive
       for (let i = 0; i < accessiblePhotos.length; i++) {
         const photo = accessiblePhotos[i];
+        console.log(`📦 Processing photo ${i + 1}/${accessiblePhotos.length}: ${photo.filename}`);
+        
         try {
-          // Télécharger le fichier depuis S3/Minio
-          const { GetObjectCommand } = require('@aws-sdk/client-s3');
+          // Utiliser la même méthode que pour le téléchargement direct
+          const s3Key = s3Storage.getPhotoPath(photo.album_id, photo.filename);
+          console.log(`📦 S3 Key: ${s3Key}`);
           
           const command = new GetObjectCommand({
             Bucket: s3Storage.bucket,
-            Key: photo.file_path,
+            Key: s3Key,
           });
 
           const response = await s3Storage.s3Client.send(command);
@@ -358,12 +408,26 @@ const photoController = {
             continue;
           }
 
-          // Convertir le stream S3 en Buffer
+          console.log(`📦 Photo ${photo.filename} - Size: ${response.ContentLength} bytes`);
+
+          // Convertir le stream AWS SDK v3 en Buffer
+          const { Readable } = require('stream');
+          let bodyStream;
+          
+          if (response.Body instanceof Readable) {
+            bodyStream = response.Body;
+          } else {
+            // Pour AWS SDK v3, convertir le ReadableStream web en Node.js stream
+            bodyStream = Readable.fromWeb(response.Body);
+          }
+
           const chunks = [];
-          for await (const chunk of response.Body) {
+          for await (const chunk of bodyStream) {
             chunks.push(chunk);
           }
           const buffer = Buffer.concat(chunks);
+          
+          console.log(`📦 Photo ${photo.filename} - Buffer size: ${buffer.length} bytes`);
 
           // Générer un nom de fichier unique pour éviter les conflits
           const fileExtension = photo.filename.split('.').pop();
@@ -372,6 +436,7 @@ const photoController = {
 
           // Ajouter le fichier à l'archive
           archive.append(buffer, { name: uniqueFilename });
+          console.log(`📦 Added ${uniqueFilename} to archive`);
           
         } catch (photoError) {
           console.error(`Error processing photo ${photo.id}:`, photoError);
@@ -380,7 +445,9 @@ const photoController = {
       }
 
       // Finaliser l'archive
+      console.log(`📦 Finalizing archive...`);
       await archive.finalize();
+      console.log(`📦 Archive finalized successfully`);
 
     } catch (error) {
       console.error('Download multiple photos error:', error);

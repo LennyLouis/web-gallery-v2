@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Container, Row, Col, Card, Button, Navbar, Nav, Dropdown, Spinner } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router';
 import { useAuth } from '~/contexts/AuthContext';
+import { useAlbums } from '~/hooks/useAlbums';
 import { api, type Album } from '~/lib/supabase';
 import type { Route } from './+types/dashboard';
 
@@ -15,9 +16,16 @@ export function meta({}: Route.MetaArgs) {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, session, logout, loading: authLoading, isSessionValid } = useAuth();
-  const [albums, setAlbums] = useState<Album[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>('');
+  
+  // Utiliser notre hook optimisé pour les albums
+  const { albums, loading: albumsLoading, error, refetch } = useAlbums(
+    session?.access_token, 
+    {
+      enabled: !!user && !!session && isSessionValid(),
+      refetchOnWindowFocus: false, // Désactiver le refetch automatique au focus
+      staleTime: 10 * 60 * 1000 // Cache de 10 minutes
+    }
+  );
 
   // Rediriger si non connecté ou token expiré
   useEffect(() => {
@@ -25,28 +33,6 @@ export default function Dashboard() {
       navigate('/login');
     }
   }, [user, authLoading, isSessionValid, navigate]);
-
-  // Charger les albums
-  useEffect(() => {
-    if (user && session) {
-      loadAlbums();
-    }
-  }, [user, session]);
-
-  const loadAlbums = async () => {
-    if (!session) return;
-
-    try {
-      setLoading(true);
-      const result = await api.getAlbums(session.access_token);
-      setAlbums(result.albums || []);
-    } catch (err) {
-      setError('Erreur lors du chargement des albums');
-      console.error('Load albums error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleLogout = async () => {
     await logout();
@@ -56,6 +42,11 @@ export default function Dashboard() {
   const handleAlbumClick = (albumId: string) => {
     navigate(`/album/${albumId}`);
   };
+
+  // Memoize loading state pour éviter re-renders inutiles
+  const loading = useMemo(() => {
+    return authLoading || albumsLoading;
+  }, [authLoading, albumsLoading]);
 
   // Ne pas afficher le dashboard si l'auth n'est pas encore chargée ou si pas d'utilisateur
   if (authLoading) {
@@ -149,7 +140,7 @@ export default function Dashboard() {
         {/* Albums Grid */}
         <Row>
           <Col>
-            {loading ? (
+            {albumsLoading ? (
               <div className="text-center py-5">
                 <Spinner animation="border" style={{color: 'var(--bs-primary)'}} />
                 <p className="mt-3 text-muted">Chargement des albums...</p>
@@ -159,7 +150,7 @@ export default function Dashboard() {
                 <div className="fs-1 text-muted mb-3">⚠️</div>
                 <h4 className="h5 text-muted mb-2">Erreur</h4>
                 <p className="text-muted mb-4">{error}</p>
-                <button className="btn-clean-primary" onClick={loadAlbums}>
+                <button className="btn-clean-primary" onClick={refetch}>
                   Réessayer
                 </button>
               </div>

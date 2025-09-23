@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Button, Table, Badge, Navbar, Nav, Dropdown, Spinner, Form, Modal } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router';
 import { useAuth } from '~/contexts/AuthContext';
+import { useAlbums } from '~/hooks/useAlbums';
 import { api, type Album } from '~/lib/supabase';
 import type { Route } from './+types/admin';
 
@@ -15,10 +16,19 @@ export function meta({}: Route.MetaArgs) {
 export default function AdminPage() {
   const navigate = useNavigate();
   const { user, logout, loading: authLoading } = useAuth();
-  const [albums, setAlbums] = useState<Album[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Utiliser notre hook optimisé pour les albums
+  const { albums, loading: albumsLoading, error: albumsError, refetch } = useAlbums();
+
+  const loading = albumsLoading;
+
+  useEffect(() => {
+    if (albumsError) {
+      setError('Erreur lors du chargement des albums');
+    }
+  }, [albumsError]);
 
   // Form for new album
   const [albumForm, setAlbumForm] = useState({
@@ -37,26 +47,6 @@ export default function AdminPage() {
     }
   }, [user, authLoading, navigate]);
 
-  // Charger les albums
-  useEffect(() => {
-    if (user && user.role === 'admin') {
-      loadAlbums();
-    }
-  }, [user]);
-
-  const loadAlbums = async () => {
-    try {
-      setLoading(true);
-      const result = await api.getAlbums();
-      setAlbums(result.albums || []);
-    } catch (err) {
-      setError('Erreur lors du chargement des albums');
-      console.error('Load albums error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleLogout = async () => {
     await logout();
     navigate('/login');
@@ -68,8 +58,6 @@ export default function AdminPage() {
 
   const handleCreateAlbum = async () => {
     try {
-      setLoading(true);
-
       const albumData = {
         title: albumForm.title,
         description: albumForm.description || undefined,
@@ -80,7 +68,7 @@ export default function AdminPage() {
       };
 
       await api.createAlbum(albumData);
-      await loadAlbums();
+      await refetch(); // Utiliser refetch du hook au lieu de loadAlbums
       setShowCreateModal(false);
       setAlbumForm({ title: '', description: '', date: '', location: '', tags: '', is_public: false });
       alert('Album créé avec succès !');
@@ -88,8 +76,6 @@ export default function AdminPage() {
     } catch (err) {
       console.error('Create album error:', err);
       alert('Erreur lors de la création de l\'album');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -191,7 +177,7 @@ export default function AdminPage() {
                     <div className="fs-1 text-muted mb-3">⚠️</div>
                     <h4 className="h5 text-muted mb-2">Erreur</h4>
                     <p className="text-muted mb-4">{error}</p>
-                    <Button variant="primary" onClick={loadAlbums}>
+                    <Button variant="primary" onClick={refetch}>
                       Réessayer
                     </Button>
                   </div>
