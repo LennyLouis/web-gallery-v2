@@ -3,6 +3,7 @@ import { Container, Row, Col, Card, Button, Navbar, Nav, Badge, Modal, Spinner, 
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router';
 import { useAuth } from '~/contexts/AuthContext';
 import { api, type Album, type Photo } from '~/lib/supabase';
+import { apiClient } from '~/lib/apiClient';
 import type { Route } from './+types/album.$id';
 
 export function meta({}: Route.MetaArgs) {
@@ -12,11 +13,28 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+// Hook sécurisé pour useAuth qui ne crash pas si AuthProvider n'est pas disponible
+const useSafeAuth = () => {
+  try {
+    return useAuth();
+  } catch (error) {
+    return {
+      user: null,
+      session: null,
+      loading: false,
+      isSessionValid: () => false
+    };
+  }
+};
+
 export default function AlbumPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, session } = useAuth();
+  
+  // Si il y a un token d'accès, on peut éviter d'utiliser le contexte d'auth pour l'instant
+  const authData = useSafeAuth();
+  const { user, session, loading: authLoading, isSessionValid } = authData;
 
   const [album, setAlbum] = useState<Album | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -26,40 +44,82 @@ export default function AlbumPage() {
   const [error, setError] = useState<string>('');
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState<Photo | null>(null);
+  const [hasDownloadPermission, setHasDownloadPermission] = useState<boolean>(false);
+  const [hasTriedPublicAccess, setHasTriedPublicAccess] = useState<boolean>(false);
+  const [tokenCleared, setTokenCleared] = useState<number>(0); // Pour forcer re-évaluation
+  const [isHandlingExpiredToken, setIsHandlingExpiredToken] = useState<boolean>(false);
+  const [showLoginPrompt, setShowLoginPrompt] = useState<boolean>(false);
 
   // Pour les accès par lien - utiliser sessionStorage de manière sécurisée
-  const accessToken = sessionStorage.getItem('access_token');
-  const sessionAlbumId = sessionStorage.getItem('album_id');
-  const isAccessLink = !!accessToken && !user && sessionAlbumId === id;
+  const urlToken = searchParams.get('token'); // Token venant de l'URL
+  const storedAccessToken = typeof window !== 'undefined' ? sessionStorage.getItem('access_token') : null;
+  const sessionAlbumId = typeof window !== 'undefined' ? sessionStorage.getItem('album_id') : null;
+  
+  // Utiliser le token de l'URL en priorité, sinon celui du sessionStorage
+  const accessToken = urlToken || storedAccessToken;
+  const isAccessLink = !!accessToken && (urlToken || sessionAlbumId === id);
+  const isUserAccess = user && isSessionValid();
+
+  // Fonction helper pour nettoyer les tokens expirés
+  const clearExpiredToken = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('access_token');
+      sessionStorage.removeItem('album_id');
+    }
+    setIsHandlingExpiredToken(true);
+    setTokenCleared(prev => prev + 1); // Forcer re-évaluation
+  };
 
   useEffect(() => {
     if (!id) return;
 
-    // Si pas de token d'accès et pas d'utilisateur connecté, rediriger
-    if (!isAccessLink && !user) {
-      navigate('/login');
+    // Attendre que l'authentification soit chargée avant de vérifier l'accès
+    if (authLoading) return;
+
+    // Si on est en train de gérer un token expiré, ne rien faire
+    if (isHandlingExpiredToken) return;
+
+    // Si il y a un token dans l'URL, le valider d'abord
+    if (urlToken && !hasTriedPublicAccess) {
+      validateAndSetAccessToken(urlToken);
       return;
     }
 
-    loadAlbumData();
-  }, [id, user, accessToken]);
+    // Si on a un accès valide (token d'accès ou utilisateur connecté), charger directement
+    if (isAccessLink || isUserAccess) {
+      loadAlbumData();
+      return;
+    }
+
+    // Sinon, essayer de charger l'album en tant qu'album public (une seule fois)
+    if (!hasTriedPublicAccess) {
+      loadPublicAlbumData();
+    }
+  }, [id, user, urlToken, storedAccessToken, authLoading, isAccessLink, hasTriedPublicAccess, tokenCleared, isHandlingExpiredToken]);
 
   const loadAlbumData = async () => {
     if (!id) return;
+
+    // Vérifier qu'on a un mode d'accès valide avant de continuer
+    if (!isAccessLink && !isUserAccess) {
+      return;
+    }
 
     try {
       setLoading(true);
 
       if (isAccessLink && accessToken) {
-        // Charger album via lien d'accès sécurisé
+        // Mode accès par lien : charger via token d'accès
         const albumResult = await api.getAlbum(id, accessToken);
         setAlbum(albumResult.album);
 
-        // Charger photos via lien d'accès
         const photosResult = await api.getPhotos(id, accessToken);
         setPhotos(photosResult.photos || []);
-      } else if (session) {
-        // Charger album normalement
+        
+        // Pour les accès par lien, on suppose qu'ils ont les permissions de téléchargement
+        setHasDownloadPermission(true);
+      } else if (isUserAccess && session) {
+        // Mode utilisateur connecté : charger via session utilisateur
         const [albumResult, photosResult] = await Promise.all([
           api.getAlbum(id),
           api.getPhotos(id)
@@ -67,10 +127,126 @@ export default function AlbumPage() {
 
         setAlbum(albumResult.album);
         setPhotos(photosResult.photos || []);
+
+        // Vérifier les permissions de téléchargement pour les utilisateurs connectés
+        try {
+          const permissionResult = await api.checkPermission(id, 'download');
+          setHasDownloadPermission(permissionResult.has_permission);
+        } catch (permErr) {
+          // Si la vérification échoue, on assume pas de permission de téléchargement
+          setHasDownloadPermission(false);
+        }
+      } else {
+        // Aucun mode d'accès valide
+        throw new Error('No valid access method available');
+      }
+    } catch (err: any) {
+      console.error('Load album error:', err);
+      
+      // Si c'est une erreur 403 avec un token d'accès, le token a probablement expiré
+      if (err.response?.status === 403 && isAccessLink) {
+        clearExpiredToken();
+        
+        // Appeler directement loadPublicAlbumData au lieu de re-déclencher loadAlbumData
+        try {
+          await loadPublicAlbumData();
+          return; // Sortir ici pour éviter de setter l'erreur
+        } catch (publicErr) {
+          console.error('Public access also failed:', publicErr);
+          setError('Album non accessible');
+        }
+      } else {
+        setError('Erreur lors du chargement de l\'album');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const validateAndSetAccessToken = async (token: string) => {
+    try {
+      setLoading(true);
+      setHasTriedPublicAccess(true); // Marquer qu'on a tenté l'accès
+
+      // Valider le token d'accès
+      const result = await api.validateAccessLink(token);
+
+      if (result.success && result.album) {
+        
+        // Définir les permissions en fonction du type de lien d'accès
+        if (result.accessLink && result.accessLink.permission_type) {
+          const hasDownload = result.accessLink.permission_type === 'download';
+          setHasDownloadPermission(hasDownload);
+        } else {
+          setHasDownloadPermission(false);
+        }
+        
+        // Stocker le token validé dans sessionStorage
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('access_token', token);
+          sessionStorage.setItem('album_id', result.album.id);
+        }
+
+        // Vérifier que l'album correspond à celui demandé
+        if (result.album.id === id) {
+          // Recharger avec le token validé
+          loadAlbumData();
+        } else {
+          navigate(`/album/${result.album.id}`);
+        }
+      } else {
+        // Token invalide, nettoyer sessionStorage et essayer en tant qu'album public
+        clearExpiredToken();
+        loadPublicAlbumData();
+      }
+    } catch (err: any) {
+      console.error('Token validation error:', err);
+      
+      // Si c'est une erreur 403 (token expiré), nettoyer sessionStorage
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        clearExpiredToken();
+      }
+      
+      // Si la validation échoue, essayer en tant qu'album public
+      loadPublicAlbumData();
+    }
+  };
+
+  const loadPublicAlbumData = async () => {
+    if (!id) return;
+
+    try {
+      setLoading(true);
+      setHasTriedPublicAccess(true); // Marquer qu'on a tenté l'accès public
+
+      // Essayer de charger l'album en tant qu'album public
+      // D'abord, récupérer tous les albums publics pour voir si celui-ci en fait partie
+      const publicAlbumsResult = await apiClient.getPublicAlbums();
+      const publicAlbum = publicAlbumsResult.albums.find((album: Album) => album.id === id);
+
+      if (publicAlbum) {
+        setAlbum(publicAlbum);
+
+        // Charger les photos de l'album public (sans authentification)
+        try {
+          const photosResult = await apiClient.getPhotosByAccessToken(id, ''); // Essayer sans token
+          setPhotos(photosResult.photos || []);
+        } catch (photoErr) {
+          setPhotos([]);
+        }
+
+        // Les albums publics ont les permissions de téléchargement
+        setHasDownloadPermission(true);
+      } else {
+        // Album non public, afficher un message d'erreur au lieu de rediriger
+        setError('Album privé - connexion requise');
+        setShowLoginPrompt(true);
       }
     } catch (err) {
+      console.error('Load public album error:', err);
+      // Si ça échoue, afficher un message d'erreur
       setError('Erreur lors du chargement de l\'album');
-      console.error('Load album error:', err);
+      setShowLoginPrompt(true);
     } finally {
       setLoading(false);
     }
@@ -97,41 +273,29 @@ export default function AlbumPage() {
   const handleDownloadSelected = async () => {
     if (selectedPhotos.size === 0) return;
 
+    if (!hasDownloadPermission) {
+      // Générer une liste des photos sélectionnées
+      const selectedPhotosList = photos.filter(photo => selectedPhotos.has(photo.id));
+      generatePhotoList(selectedPhotosList);
+      return;
+    }
+
     try {
       setDownloading(true);
       const photoIds = Array.from(selectedPhotos);
 
       if (isAccessLink && accessToken) {
-        // Download via access link sécurisé
-        const result = await api.downloadPhotos(photoIds, accessToken);
-
-        if (result.photos) {
-          // Créer et télécharger les fichiers
-          result.photos.forEach((photo: any, index: number) => {
-            setTimeout(() => {
-              const a = document.createElement('a');
-              a.href = photo.download_url;
-              a.download = photo.filename;
-              a.click();
-            }, index * 100); // Délai pour éviter de bloquer le navigateur
-          });
-        }
-      } else if (session) {
-        const result = await api.downloadPhotos(photoIds);
-
-        if (result.photos) {
-          // Créer et télécharger les fichiers
-          result.photos.forEach((photo: any, index: number) => {
-            setTimeout(() => {
-              const a = document.createElement('a');
-              a.href = photo.download_url;
-              a.download = photo.filename;
-              a.click();
-            }, index * 100); // Délai pour éviter de bloquer le navigateur
-          });
-        }
+        // Mode accès par lien : télécharger via token d'accès
+        await api.downloadPhotos(photoIds, accessToken);
+      } else if (isUserAccess) {
+        // Mode utilisateur connecté : télécharger via session utilisateur
+        await api.downloadPhotos(photoIds);
+      } else {
+        throw new Error('No valid access method for download');
       }
 
+      // Le téléchargement est maintenant géré directement par l'API client
+      // Pas besoin de traiter result.photos
       setSelectedPhotos(new Set());
     } catch (err) {
       console.error('Download error:', err);
@@ -141,10 +305,75 @@ export default function AlbumPage() {
     }
   };
 
+  const handleDownloadAll = async () => {
+    if (photos.length === 0) return;
+
+    if (!hasDownloadPermission) {
+      // Générer une liste des noms de photos
+      generatePhotoList(photos);
+      return;
+    }
+
+    try {
+      setDownloading(true);
+      const photoIds = photos.map(photo => photo.id);
+
+      if (isAccessLink && accessToken) {
+        // Mode accès par lien : télécharger via token d'accès
+        await api.downloadPhotos(photoIds, accessToken);
+      } else if (isUserAccess) {
+        // Mode utilisateur connecté : télécharger via session utilisateur
+        await api.downloadPhotos(photoIds);
+      } else {
+        throw new Error('No valid access method for download');
+      }
+    } catch (err) {
+      console.error('Download all error:', err);
+      setError('Erreur lors du téléchargement');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const generatePhotoList = (photosToList: Photo[]) => {
+    const photoNames = photosToList
+      .map(photo => photo.filename || `Photo ${photo.id}`)
+      .join('\n');
+    
+    const listContent = `Liste des photos - ${album?.title || 'Album'}\n` +
+                       `Date: ${new Date().toLocaleDateString('fr-FR')}\n` +
+                       `Nombre de photos: ${photosToList.length}\n\n` +
+                       photoNames;
+
+    // Créer un fichier texte téléchargeable
+    const blob = new Blob([listContent], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `liste-photos-${album?.title?.replace(/[^a-zA-Z0-9]/g, '-') || 'album'}-${Date.now()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   const openImageModal = (photo: Photo) => {
     setSelectedImage(photo);
     setShowImageModal(true);
   };
+
+  if (authLoading) {
+    return (
+      <div className="web-gallery">
+        <Container className="py-5">
+          <div className="text-center">
+            <Spinner animation="border" className="mb-3" />
+            <h5 className="text-muted">Chargement...</h5>
+          </div>
+        </Container>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -167,9 +396,23 @@ export default function AlbumPage() {
             <div className="fs-1 text-muted mb-3">⚠️</div>
             <h4 className="h5 text-muted mb-2">Erreur</h4>
             <p className="text-muted mb-4">{error}</p>
-            <Button variant="primary" onClick={loadAlbumData}>
-              Réessayer
-            </Button>
+            {showLoginPrompt ? (
+              <div className="d-flex gap-2 justify-content-center">
+                <Button 
+                  variant="primary" 
+                  onClick={() => navigate('/login')}
+                >
+                  Se connecter
+                </Button>
+                <Button variant="outline-secondary" onClick={loadAlbumData}>
+                  Réessayer
+                </Button>
+              </div>
+            ) : (
+              <Button variant="primary" onClick={loadAlbumData}>
+                Réessayer
+              </Button>
+            )}
           </div>
         </Container>
       </div>
@@ -255,6 +498,22 @@ export default function AlbumPage() {
                       >
                         {selectedPhotos.size === photos.length ? 'Tout désélectionner' : 'Tout sélectionner'}
                       </Button>
+                      <Button
+                        variant={hasDownloadPermission ? "outline-success" : "outline-info"}
+                        size="sm"
+                        onClick={handleDownloadAll}
+                        disabled={downloading}
+                        className="me-2"
+                      >
+                        {downloading ? (
+                          <>
+                            <Spinner size="sm" className="me-1" />
+                            {hasDownloadPermission ? 'Téléchargement...' : 'Génération...'}
+                          </>
+                        ) : (
+                          hasDownloadPermission ? '⬇️ Tout télécharger' : '📋 Liste complète'
+                        )}
+                      </Button>
                       {selectedPhotos.size > 0 && (
                         <Badge bg="primary">
                           {selectedPhotos.size} sélectionnée{selectedPhotos.size > 1 ? 's' : ''}
@@ -263,17 +522,19 @@ export default function AlbumPage() {
                     </div>
                     {selectedPhotos.size > 0 && (
                       <Button
-                        className="btn-clean-primary"
+                        variant={hasDownloadPermission ? "primary" : "outline-info"}
                         onClick={handleDownloadSelected}
                         disabled={downloading}
                       >
                         {downloading ? (
                           <>
                             <Spinner size="sm" className="me-2" />
-                            Téléchargement...
+                            {hasDownloadPermission ? 'Téléchargement...' : 'Génération...'}
                           </>
                         ) : (
-                          `⬇️ Télécharger (${selectedPhotos.size})`
+                          hasDownloadPermission 
+                            ? `⬇️ Télécharger (${selectedPhotos.size})`
+                            : `📋 Liste (${selectedPhotos.size})`
                         )}
                       </Button>
                     )}
@@ -303,7 +564,7 @@ export default function AlbumPage() {
                     <div className="position-relative">
                       <Card.Img
                         variant="top"
-                        src={photo.preview_path} // TODO: Gérer les URLs signées
+                        src={photo.preview_url || photo.preview_path}
                         alt={photo.original_name}
                         style={{
                           height: '200px',
@@ -357,7 +618,7 @@ export default function AlbumPage() {
           {selectedImage && (
             <div className="text-center">
               <img
-                src={selectedImage.file_path} // TODO: Gérer les URLs signées
+                src={selectedImage.download_url || selectedImage.file_path}
                 alt={selectedImage.original_name}
                 className="img-fluid"
                 style={{ maxHeight: '80vh' }}

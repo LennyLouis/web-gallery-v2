@@ -4,6 +4,26 @@ import { Link, useNavigate } from 'react-router';
 import { useAuth } from '~/contexts/AuthContext';
 import type { Route } from './+types/login';
 
+// Safe hook for handling AuthProvider context issues
+const useSafeAuth = () => {
+  try {
+    return useAuth();
+  } catch (error) {
+    // If AuthProvider is not available, return default values
+    return {
+      user: null,
+      session: null,
+      loading: false,
+      isSessionValid: () => false,
+      login: async () => ({ success: false, error: 'Authentication not available' }),
+      register: async () => ({ success: false, error: 'Authentication not available' }),
+      validateAccessLink: async () => ({ success: false, error: 'Authentication not available', album: null }),
+      refreshSession: async () => ({ success: false, error: 'Authentication not available' }),
+      logout: async () => ({ success: true })
+    };
+  }
+};
+
 export function meta({}: Route.MetaArgs) {
   return [
     { title: 'Les photos de Lenny - Connexion' },
@@ -13,7 +33,7 @@ export function meta({}: Route.MetaArgs) {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { user, login, validateAccessLink, loading: authLoading } = useAuth();
+  const { user, login, validateAccessLink, loading: authLoading } = useSafeAuth();
 
   const [activeTab, setActiveTab] = useState<'login' | 'access-link'>('login');
   const [formData, setFormData] = useState({

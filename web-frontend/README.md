@@ -1,87 +1,100 @@
-# Welcome to React Router!
+# Web Gallery Frontend
 
-A modern, production-ready template for building full-stack React applications using React Router.
+Interface utilisateur moderne pour la galerie photo Web Gallery v2.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## 🛠️ Technologies
 
-## Features
+- **Framework**: React Router v7 (Remix)
+- **Build Tool**: Vite
+- **Language**: TypeScript
+- **UI Components**: React Bootstrap
+- **Styling**: Bootstrap CSS + Custom CSS
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+## 🚀 Démarrage
 
-## Getting Started
-
-### Installation
-
-Install the dependencies:
-
+### Installation des dépendances
 ```bash
 npm install
 ```
 
-### Development
-
-Start the development server with HMR:
-
+### Développement
 ```bash
 npm run dev
 ```
+Application disponible sur `http://localhost:5173`
 
-Your application will be available at `http://localhost:5173`.
-
-## Building for Production
-
-Create a production build:
-
+### Build de production
 ```bash
 npm run build
 ```
 
-## Deployment
-
-### Docker Deployment
-
-To build and run using Docker:
-
+### Déploiement Docker
 ```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
+docker build -t web-gallery-frontend .
+docker run -p 3000:3000 web-gallery-frontend
 ```
 
-The containerized application can be deployed to any platform that supports Docker, including:
-
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
+## 📁 Structure
 
 ```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
+app/
+├── routes/             # Pages et routes
+│   ├── _index.tsx     # Page d'accueil
+│   ├── login.tsx      # Connexion
+│   ├── dashboard.tsx  # Tableau de bord
+│   ├── album.$id.tsx  # Visualisation d'album
+│   └── admin/         # Interface d'administration
+├── contexts/          # Contextes React
+│   └── AuthContext.tsx
+├── hooks/             # Hooks personnalisés
+├── lib/               # Utilitaires et clients API
+│   ├── apiClient.ts   # Client API
+│   └── supabase.ts    # Configuration Supabase
+└── app.css           # Styles globaux
 ```
 
-## Styling
+## 🔧 Configuration
 
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
+### Variables d'environnement
+```bash
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_API_BASE_URL=http://localhost:5000/api
+```
 
----
+## 🎨 Fonctionnalités UI
+
+### Pages Principales
+- **Page d'accueil** : Présentation et accès aux albums publics
+- **Connexion/Inscription** : Authentification utilisateur
+- **Tableau de bord** : Gestion des albums personnels
+- **Galerie d'album** : Visualisation et téléchargement de photos
+- **Administration** : Gestion avancée des albums et permissions
+
+### Composants Clés
+- **Lightbox** : Visualisation plein écran des photos
+- **Sélection multiple** : Interface pour téléchargements groupés
+- **Formulaires responsives** : Création et modification d'albums
+- **Navigation adaptative** : Interface mobile-friendly
+
+### Authentification
+- Contexte d'authentification avec gestion d'état
+- Tokens JWT avec rafraîchissement automatique
+- Protection des routes sensibles
+- Gestion des sessions expirées
+
+## 🔒 Sécurité Frontend
+
+- Validation des formulaires côté client
+- Gestion sécurisée des tokens
+- Protection contre les XSS
+- Validation des types de fichiers
+
+## 📱 Responsive Design
+
+- Interface adaptée mobile/tablette/desktop
+- Navigation optimisée pour tous écrans
+- Galerie responsive avec grille adaptative
+- Formulaires optimisés tactile
 
 Built with ❤️ using React Router.

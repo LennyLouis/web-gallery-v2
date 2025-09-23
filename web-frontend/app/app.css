@@ -328,12 +328,6 @@
   box-shadow: 0 4px 16px rgba(111, 168, 220, 0.3);
 }
 
-.photo-checkbox {
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 50%;
-  padding: 4px;
-}
-
 .photo-checkbox input[type="checkbox"] {
   width: 20px;
   height: 20px;

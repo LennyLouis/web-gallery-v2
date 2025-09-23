@@ -1,0 +1,14 @@
+{
+  "generatorName": "typescript-fetch",
+  "inputSpec": "http://localhost:3000/api-docs.json",
+  "outputDir": "./app/lib/generated",
+  "additionalProperties": {
+    "typescriptThreePlus": true,
+    "supportsES6": true,
+    "npmName": "web-gallery-api",
+    "npmVersion": "1.0.0"
+  },
+  "globalProperties": {
+    "modelPropertyNaming": "camelCase"
+  }
+}

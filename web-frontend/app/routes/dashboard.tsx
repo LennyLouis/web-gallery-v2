@@ -14,17 +14,17 @@ export function meta({}: Route.MetaArgs) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, session, logout } = useAuth();
+  const { user, session, logout, loading: authLoading, isSessionValid } = useAuth();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
 
-  // Rediriger si non connecté
+  // Rediriger si non connecté ou token expiré
   useEffect(() => {
-    if (!user) {
+    if (!authLoading && (!user || !isSessionValid())) {
       navigate('/login');
     }
-  }, [user, navigate]);
+  }, [user, authLoading, isSessionValid, navigate]);
 
   // Charger les albums
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function Dashboard() {
 
     try {
       setLoading(true);
-      const result = await api.getAlbums();
+      const result = await api.getAlbums(session.access_token);
       setAlbums(result.albums || []);
     } catch (err) {
       setError('Erreur lors du chargement des albums');
@@ -57,15 +57,33 @@ export default function Dashboard() {
     navigate(`/album/${albumId}`);
   };
 
-  if (!user) return null;
+  // Ne pas afficher le dashboard si l'auth n'est pas encore chargée ou si pas d'utilisateur
+  if (authLoading) {
+    return (
+      <div className="web-gallery">
+        <Container className="py-5">
+          <div className="text-center">
+            <Spinner animation="border" style={{color: 'var(--bs-primary)'}} />
+            <p className="mt-3 text-muted">Chargement...</p>
+          </div>
+        </Container>
+      </div>
+    );
+  }
+
+  if (!user) {
+    navigate('/login');
+    return null;
+  }
 
   return (
     <div className="web-gallery">
       {/* Navigation */}
       <Navbar expand="lg" className="bg-white shadow-sm">
         <Container>
-          <Navbar.Brand href="#" className="fw-bold" style={{color: 'var(--bs-primary)'}}>
-            📸 Les photos de Lenny
+          <Navbar.Brand href="#" className="fw-bold d-flex align-items-center" style={{color: 'var(--bs-primary)'}}>
+            <img src="/logo-transparent-256x256.png" alt="Logo" width="32" height="32" className="me-2" />
+            Les photos de Lenny
           </Navbar.Brand>
           <Navbar.Toggle aria-controls="basic-navbar-nav" />
           <Navbar.Collapse id="basic-navbar-nav">
@@ -116,11 +134,11 @@ export default function Dashboard() {
               </div>
               {user.role === 'admin' && (
                 <div>
-                  <button className="btn-clean-primary me-2">
-                    📁 Nouvel Album
-                  </button>
-                  <button className="btn-outline-clean">
-                    ⚙️ Gérer
+                  <button
+                    className="btn-clean-primary"
+                    onClick={() => navigate('/admin')}
+                  >
+                    ⚙️ Administration
                   </button>
                 </div>
               )}
@@ -151,15 +169,10 @@ export default function Dashboard() {
                 <h4 className="h5 text-muted mb-2">Aucun album trouvé</h4>
                 <p className="text-muted mb-4">
                   {user.role === 'admin'
-                    ? 'Commencez par créer votre premier album photo.'
+                    ? 'Aucun album créé pour le moment. Utilisez l\'administration pour en créer.'
                     : 'Aucun album ne vous a encore été attribué.'
                   }
                 </p>
-                {user.role === 'admin' && (
-                  <button className="btn-clean-primary">
-                    📁 Créer un album
-                  </button>
-                )}
               </div>
             ) : (
               <>
@@ -176,17 +189,40 @@ export default function Dashboard() {
                         style={{ cursor: 'pointer' }}
                         onClick={() => handleAlbumClick(album.id)}
                       >
-                        <Card.Body className="p-4">
-                          <div className="d-flex align-items-center mb-3">
-                            <div className="fs-2 me-3">📸</div>
-                            <div className="flex-grow-1">
-                              <h5 className="card-title mb-1 fw-bold" style={{color: 'var(--bs-primary)'}}>
-                                {album.title}
-                              </h5>
-                              <small className="text-muted">
-                                {album.photo_count || 0} photo{(album.photo_count || 0) > 1 ? 's' : ''}
-                              </small>
+                        {/* Album Cover Image */}
+                        <div className="position-relative" style={{ height: '200px', overflow: 'hidden' }}>
+                          {album.cover_photo_url ? (
+                            <Card.Img
+                              variant="top"
+                              src={album.cover_photo_url}
+                              alt={album.title}
+                              style={{
+                                height: '200px',
+                                objectFit: 'cover',
+                                width: '100%'
+                              }}
+                            />
+                          ) : (
+                            <div className="d-flex align-items-center justify-content-center h-100 bg-light">
+                              <div className="text-center text-muted">
+                                <div className="fs-1">📸</div>
+                                <small>Aucune photo</small>
+                              </div>
                             </div>
+                          )}
+                          {/* Photo count overlay */}
+                          <div className="position-absolute top-0 end-0 m-2">
+                            <span className="badge bg-dark bg-opacity-75 text-white">
+                              {album.photo_count || 0} photo{(album.photo_count || 0) > 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        <Card.Body className="p-3">
+                          <div className="mb-2">
+                            <h5 className="card-title mb-1 fw-bold" style={{color: 'var(--bs-primary)'}}>
+                              {album.title}
+                            </h5>
                           </div>
 
                           {album.description && (
