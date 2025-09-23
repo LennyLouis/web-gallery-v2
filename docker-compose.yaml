@@ -11,8 +11,8 @@ services:
       args:
         - VITE_SUPABASE_URL=${SUPABASE_URL}
         - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-        - VITE_API_URL=http://localhost:${BACKEND_PUBLIC_PORT:-3000}
-        - VITE_S3_ENDPOINT=http://localhost:${MINIO_API_PORT:-9000}
+        - VITE_API_URL=http://${PUBLIC_HOST:-localhost}:${BACKEND_PUBLIC_PORT:-3000}
+        - VITE_S3_ENDPOINT=http://${PUBLIC_HOST:-localhost}:${MINIO_API_PORT:-9000}
     container_name: web-gallery-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"
