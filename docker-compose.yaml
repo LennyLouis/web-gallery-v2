@@ -2,36 +2,50 @@ version: '3.8'
 
 services:
   # ===================================
-  # FRONTEND SERVICE (React Router v7 - Static)
+  # MINIO SERVICE (S3-compatible storage)
   # ===================================
-  frontend:
-    build:
-      context: ./web-frontend
-      dockerfile: Dockerfile
-      args:
-        - VITE_SUPABASE_URL=${SUPABASE_URL}
-        - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-        - VITE_API_URL=http://${PUBLIC_HOST:-localhost}:${BACKEND_PUBLIC_PORT:-3000}
-        - VITE_S3_ENDPOINT=http://${PUBLIC_HOST:-localhost}:${MINIO_API_PORT:-9000}
-    container_name: web-gallery-frontend
-    ports:
-      - "${FRONTEND_PORT:-80}:80"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - web-gallery-network
-    restart: unless-stopped
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - /data/web-gallery-v2/minio/data:/data
+    expose: ["9000","9001"]
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`${FRONTEND_DOMAIN:-localhost}`)"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - traefik.enable=true
+      - traefik.docker.network=edge
+
+      # Service 1: API S3 (9000)
+      - traefik.http.services.minio-api.loadbalancer.server.port=9000
+      - traefik.http.routers.minio-api.rule=Host(`cdn.photos.lennylouis.fr`)
+      - traefik.http.routers.minio-api.entrypoints=websecure
+      - traefik.http.routers.minio-api.tls.certresolver=le
+      - traefik.http.routers.minio-api.service=minio-api
+
+      # Service 2: Console (9001)
+      - traefik.http.services.minio-console.loadbalancer.server.port=9001
+      - traefik.http.routers.minio-console.rule=Host(`minio-console.photos.lennylouis.fr`)
+      - traefik.http.routers.minio-console.entrypoints=websecure
+      - traefik.http.routers.minio-console.tls.certresolver=le
+      - traefik.http.routers.minio-console.service=minio-console
+    networks: [edge, app]
+    restart: unless-stopped
+
+  createbuckets:
+    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z
+    depends_on:
+      - minio
+    restart: on-failure
+    networks: [app]
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set dockerminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      /usr/bin/mc mb dockerminio/web-gallery;
+      exit 0;
+      "
 
   # ===================================
   # BACKEND SERVICE (Node.js/Express)
@@ -41,8 +55,6 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: web-gallery-backend
-    ports:
-      - "${BACKEND_PUBLIC_PORT:-3000}:${PORT:-3000}"
     environment:
       - PORT=${PORT:-3000}
       - NODE_ENV=production
@@ -50,76 +62,65 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3001}
+      - CORS_ORIGIN=${CORS_ORIGIN}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
-      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:${MINIO_PORT:-9000}}
-      - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-http://localhost:${MINIO_API_PORT:-9000}}
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       - S3_BUCKET=${S3_BUCKET:-web-gallery}
       - S3_REGION=${S3_REGION:-eu-west-1}
       - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}
+    expose: ["3000"]
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:${PORT:-3000}/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
       interval: 3s
       timeout: 3s
       retries: 6
     depends_on:
       - minio
-    networks:
-      - web-gallery-network
-    restart: unless-stopped
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=Host(`${BACKEND_DOMAIN:-api.localhost}`) || PathPrefix(`/api`)"
-      - "traefik.http.services.backend.loadbalancer.server.port=${PORT:-3000}"
+      - traefik.enable=true
+      - traefik.docker.network=edge
+      - traefik.http.routers.gallery-api.rule=Host(`photos.lennylouis.fr`) && PathPrefix(`/api`)
+      - traefik.http.routers.gallery-api.entrypoints=websecure
+      - traefik.http.routers.gallery-api.tls.certresolver=le
+      - traefik.http.services.gallery-api.loadbalancer.server.port=3000
+    networks: [edge, app]
+    restart: unless-stopped
 
   # ===================================
-  # MINIO SERVICE (S3-compatible storage)
+  # FRONTEND SERVICE (React Router v7 - Static)
   # ===================================
-  minio:
-    image: minio/minio:latest
-    container_name: web-gallery-minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "${MINIO_API_PORT:-9000}:${MINIO_PORT:-9000}"   # API
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"             # Console Web
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
-    volumes:
-      - minio_data:/data
-    networks:
-      - web-gallery-network
-    restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.minio.rule=Host(`${MINIO_DOMAIN:-minio.localhost}`)"
-      - "traefik.http.services.minio.loadbalancer.server.port=9000"
-      - "traefik.http.routers.minio-console.rule=Host(`${MINIO_CONSOLE_DOMAIN:-minio-console.localhost}`)"
-      - "traefik.http.services.minio-console.loadbalancer.server.port=9001"
-
-  # ===================================
-  # NGINX REVERSE PROXY (Optional)
-  # ===================================
-  nginx:
-    image: nginx:alpine
-    container_name: web-gallery-nginx
-    ports:
-      - "${NGINX_PORT:-80}:80"
-      - "${NGINX_SSL_PORT:-443}:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
+  frontend:
+    build:
+      context: ./web-frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=${SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+        - VITE_API_URL=${VITE_API_URL}
+        - VITE_S3_ENDPOINT=${S3_PUBLIC_ENDPOINT}
+    container_name: web-gallery-frontend
+    expose: ["80"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     depends_on:
-      - frontend
-      - backend
-    networks:
-      - web-gallery-network
+      backend:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=edge
+      - traefik.http.routers.gallery-web.rule=Host(`photos.lennylouis.fr`)
+      - traefik.http.routers.gallery-web.entrypoints=websecure
+      - traefik.http.routers.gallery-web.tls.certresolver=le
+      - traefik.http.services.gallery-web.loadbalancer.server.port=80
+    networks: [edge, app]
     restart: unless-stopped
-    profiles:
-      - "with-nginx"
 
 # ===================================
 # VOLUMES
@@ -135,7 +136,7 @@ volumes:
 # NETWORKS
 # ===================================
 networks:
-  web-gallery-network:
-    driver: bridge
-    labels:
-      - "project=web-gallery"
+  edge:
+    external: true
+  app:
+    internal: true

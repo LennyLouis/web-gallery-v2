@@ -69,7 +69,7 @@ class ApiClient {
   private onTokenExpired?: () => void;
 
   constructor() {
-    const apiUrl = import.meta.env?.VITE_API_URL || 'http://localhost:3000';
+    const apiUrl = import.meta.env?.VITE_API_URL;
 
     this.client = axios.create({
       baseURL: apiUrl,
