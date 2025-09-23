@@ -4,22 +4,14 @@ FROM node:24-alpine
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json (if available)
+# Copy package.json and package-lock.json with correct ownership
 COPY package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy the rest of the application code
+# Copy the rest of the application code with correct ownership
 COPY . .
-
-# Create a non-root user to run the application
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
-
-# Change ownership of the app directory to the nodejs user
-RUN chown -R nodejs:nodejs /app
-USER nodejs
 
 # Start the application
 CMD ["npm", "start"]
