@@ -28,11 +28,11 @@ const config = {
   storage: {
     type: 's3', // 'local' or 'supabase' or 's3'
     s3: {
-      endpoint: process.env.S3_ENDPOINT || 'http://localhost:9000',
-      accessKeyId: process.env.S3_ACCESS_KEY || 'minioadmin',
-      secretAccessKey: process.env.S3_SECRET_KEY || 'minioadmin',
-      bucket: process.env.S3_BUCKET || 'web-gallery',
-      region: 'us-east-1', // Fixed region for Minio
+      endpoint: process.env.S3_ENDPOINT,
+      accessKeyId: process.env.S3_ACCESS_KEY,
+      secretAccessKey: process.env.S3_SECRET_KEY,
+      bucket: process.env.S3_BUCKET,
+      region: process.env.S3_REGION,
       forcePathStyle: true // Required for Minio
     }
   }

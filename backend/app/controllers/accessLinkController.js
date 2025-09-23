@@ -5,7 +5,7 @@ const { supabase } = require('../config/database');
 const accessLinkController = {
   async create(req, res) {
     try {
-      const { album_id, expires_at, max_uses } = req.body;
+      const { album_id, expires_at, max_uses, permission_type } = req.body;
 
       // Vérifier que l'album existe et appartient à l'utilisateur
       const album = await Album.findById(album_id);
@@ -21,7 +21,8 @@ const accessLinkController = {
         album_id,
         created_by: req.user.id,
         expires_at: expires_at ? new Date(expires_at).toISOString() : null,
-        max_uses: max_uses || null
+        max_uses: max_uses || null,
+        permission_type: permission_type || 'view' // Default to 'view' if not specified
       };
 
       const accessLink = await AccessLink.create(linkData);
@@ -30,12 +31,16 @@ const accessLinkController = {
         message: 'Access link created successfully',
         access_link: {
           ...accessLink,
-          album_title: album.title
+          album_title: album.title,
+          permission_label: accessLink.getPermissionLabel()
         }
       });
 
     } catch (error) {
       console.error('Create access link error:', error);
+      if (error.message.includes('Invalid permission type')) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: 'Server error' });
     }
   },
@@ -60,7 +65,8 @@ const accessLinkController = {
         access_links: accessLinks.map(link => ({
           ...link,
           album_title: album.title,
-          is_valid: link.isValid()
+          is_valid: link.isValid(),
+          permission_label: link.getPermissionLabel()
         }))
       });
 
@@ -90,11 +96,15 @@ const accessLinkController = {
         throw error;
       }
 
-      const formattedLinks = accessLinks.map(link => ({
-        ...link,
-        album_title: link.albums.title,
-        is_valid: new AccessLink(link).isValid()
-      }));
+      const formattedLinks = accessLinks.map(link => {
+        const linkObj = new AccessLink(link);
+        return {
+          ...link,
+          album_title: link.albums.title,
+          is_valid: linkObj.isValid(),
+          permission_label: linkObj.getPermissionLabel()
+        };
+      });
 
       res.json({
         access_links: formattedLinks
@@ -138,7 +148,8 @@ const accessLinkController = {
         access_link: {
           ...link,
           album_title: accessLink.albums.title,
-          is_valid: link.isValid()
+          is_valid: link.isValid(),
+          permission_label: link.getPermissionLabel()
         }
       });
 
@@ -181,7 +192,9 @@ const accessLinkController = {
           album_id: accessLink.album_id,
           expires_at: accessLink.expires_at,
           used_count: accessLink.used_count,
-          max_uses: accessLink.max_uses
+          max_uses: accessLink.max_uses,
+          permission_type: accessLink.permission_type,
+          permission_label: accessLink.getPermissionLabel()
         },
         album: {
           id: album.id,
@@ -201,7 +214,7 @@ const accessLinkController = {
   async update(req, res) {
     try {
       const { id } = req.params;
-      const { expires_at, max_uses, is_active } = req.body;
+      const { expires_at, max_uses, is_active, permission_type } = req.body;
 
       const accessLink = await AccessLink.findById ? await AccessLink.findById(id) : null;
 
@@ -229,18 +242,27 @@ const accessLinkController = {
         }
       }
 
+      // Validate permission_type if provided
+      if (permission_type && !AccessLink.validatePermissionType(permission_type)) {
+        return res.status(400).json({ error: 'Invalid permission type. Must be "view" or "download"' });
+      }
+
       const updates = {};
       if (expires_at !== undefined) {
         updates.expires_at = expires_at ? new Date(expires_at).toISOString() : null;
       }
       if (max_uses !== undefined) updates.max_uses = max_uses;
       if (is_active !== undefined) updates.is_active = is_active;
+      if (permission_type !== undefined) updates.permission_type = permission_type;
 
       const updatedLink = await AccessLink.update(id, updates);
 
       res.json({
         message: 'Access link updated successfully',
-        access_link: updatedLink
+        access_link: {
+          ...updatedLink,
+          permission_label: updatedLink.getPermissionLabel()
+        }
       });
 
     } catch (error) {

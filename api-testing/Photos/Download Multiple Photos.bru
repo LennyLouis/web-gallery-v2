@@ -16,7 +16,7 @@ auth:bearer {
 
 body:json {
   {
-    "photoIds": ["{{testPhotoId}}"]
+    "photoIds": ["16192fad-8821-4f86-b25c-ff432e44b383","9d941b1f-b55f-421c-87e2-b2871abda379"]
   }
 }
 
@@ -24,11 +24,11 @@ tests {
   test("should return 200", function() {
     expect(res.getStatus()).to.equal(200);
   });
-
+  
   test("should return photos with download URLs", function() {
     expect(res.getBody().photos).to.be.an('array');
   });
-
+  
   test("should have download structure", function() {
     if (res.getBody().photos.length > 0) {
       const photo = res.getBody().photos[0];

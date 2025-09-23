@@ -178,6 +178,7 @@ const processImages = async (req, res, next) => {
     // Ajouter les fichiers traités à la requête
     req.processedFiles = allProcessedFiles;
     req.processingErrors = allErrors;
+    
     next();
 
   } catch (error) {
@@ -211,17 +212,33 @@ const checkAlbumAccess = async (req, res, next) => {
 
 // Middleware flexible qui accepte 'files' OU 'photos'
 const flexibleUpload = (req, res, next) => {
-  const uploadFiles = upload.array('files', 50);
-  const uploadPhotos = upload.array('photos', 50);
+  // Créer un middleware qui accepte les deux noms de champs
+  const uploadBoth = upload.fields([
+    { name: 'files', maxCount: 50 },
+    { name: 'photos', maxCount: 50 }
+  ]);
 
-  // Essayer d'abord avec 'files'
-  uploadFiles(req, res, (err) => {
-    if (err && err.code === 'LIMIT_UNEXPECTED_FILE' && err.field === 'photos') {
-      // Si erreur car le champ est 'photos', essayer avec 'photos'
-      uploadPhotos(req, res, next);
-    } else {
-      next(err);
+  uploadBoth(req, res, (err) => {
+    if (err) {
+      console.error('flexibleUpload: Upload error:', err.message);
+      return next(err);
     }
+
+    // Normaliser les fichiers - convertir les objets en array
+    let files = [];
+    if (req.files) {
+      if (req.files.files) {
+        files = files.concat(req.files.files);
+      }
+      if (req.files.photos) {
+        files = files.concat(req.files.photos);
+      }
+    }
+
+    // Remettre les fichiers dans req.files pour compatibilité avec le reste du code
+    req.files = files;
+    
+    next();
   });
 };
 

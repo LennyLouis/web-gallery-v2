@@ -1,6 +1,9 @@
 const Photo = require('../models/Photo');
 const Album = require('../models/Album');
+const UserAlbumPermission = require('../models/UserAlbumPermission');
 const { supabase, supabaseAdmin } = require('../config/database');
+const s3Storage = require('../utils/s3Storage');
+const archiver = require('archiver');
 
 const photoController = {
   async upload(req, res) {
@@ -43,21 +46,54 @@ const photoController = {
   async getByAlbum(req, res) {
     try {
       const { albumId } = req.params;
+      const { access_token } = req.query;
 
-      // Vérifier l'accès à l'album
+      // Si un token d'accès est fourni, l'utiliser pour la validation
+      if (access_token) {
+        const AccessLink = require('../models/AccessLink');
+        const accessLink = await AccessLink.findByToken(access_token);
+        
+        if (!accessLink || !accessLink.is_active) {
+          return res.status(401).json({ error: 'Invalid access token' });
+        }
+
+        if (accessLink.album_id !== albumId) {
+          return res.status(403).json({ error: 'Access token not valid for this album' });
+        }
+
+        const photos = await Photo.findByAlbum(albumId);
+
+        const photosWithUrls = await Promise.all(
+          photos.map(async (photo) => {
+            const [downloadUrl, previewUrl] = await Promise.all([
+              photo.getDownloadUrl(),
+              photo.getPreviewUrl()
+            ]);
+
+            return {
+              ...photo,
+              download_url: downloadUrl,
+              preview_url: previewUrl
+            };
+          })
+        );
+
+        return res.json({ photos: photosWithUrls });
+      }
+
+      // Mode utilisateur authentifié normal
       const album = await Album.findById(albumId);
       if (!album) {
         return res.status(404).json({ error: 'Album not found' });
       }
 
-      const hasAccess = album.owner_id === req.user.id || album.is_public;
+      const hasAccess = await UserAlbumPermission.hasPermission(req.user.id, albumId, 'view');
       if (!hasAccess) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
       const photos = await Photo.findByAlbum(albumId);
 
-      // Générer les URLs signées pour chaque photo
       const photosWithUrls = await Promise.all(
         photos.map(async (photo) => {
           const [downloadUrl, previewUrl] = await Promise.all([
@@ -73,9 +109,7 @@ const photoController = {
         })
       );
 
-      res.json({
-        photos: photosWithUrls
-      });
+      res.json({ photos: photosWithUrls });
 
     } catch (error) {
       console.error('Get photos error:', error);
@@ -98,7 +132,7 @@ const photoController = {
         return res.status(404).json({ error: 'Album not found' });
       }
 
-      const hasAccess = album.owner_id === req.user.id || album.is_public;
+      const hasAccess = await UserAlbumPermission.hasPermission(req.user.id, photo.album_id, 'view');
       if (!hasAccess) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -223,8 +257,19 @@ const photoController = {
         return res.status(400).json({ error: 'Photo IDs array required' });
       }
 
+      if (photoIds.length > 50) {
+        return res.status(400).json({ error: 'Maximum 50 photos per download' });
+      }
+      
       const photos = await Promise.all(
-        photoIds.map(id => Photo.findById(id))
+        photoIds.map(async id => {
+          try {
+            return await Photo.findById(id);
+          } catch (error) {
+            console.warn(`Failed to fetch photo ${id}:`, error);
+            return null;
+          }
+        })
       );
 
       const validPhotos = photos.filter(photo => photo !== null);
@@ -237,25 +282,111 @@ const photoController = {
       const accessiblePhotos = [];
 
       for (const photo of validPhotos) {
-        const album = await Album.findById(photo.album_id);
-        if (album && (album.owner_id === req.user.id || album.is_public)) {
-          const downloadUrl = await photo.getDownloadUrl();
-          accessiblePhotos.push({
-            id: photo.id,
-            filename: photo.filename,
-            original_name: photo.original_name,
-            download_url: downloadUrl
-          });
+        let hasAccess = false;
+        
+        if (req.accessLink) {
+          // Mode access token : vérifier que la photo appartient à l'album du lien d'accès
+          hasAccess = (photo.album_id === req.accessLink.album_id);
+        } else if (req.user) {
+          // Mode utilisateur authentifié : vérifier les permissions utilisateur
+          hasAccess = await UserAlbumPermission.hasPermission(req.user.id, photo.album_id, 'download');
+        }
+        
+        if (hasAccess) {
+          accessiblePhotos.push(photo);
         }
       }
 
-      res.json({
-        photos: accessiblePhotos
+      if (accessiblePhotos.length === 0) {
+        return res.status(403).json({ error: 'No accessible photos found' });
+      }
+
+      // Si c'est une seule photo, rediriger vers le téléchargement direct
+      if (accessiblePhotos.length === 1) {
+        const photo = accessiblePhotos[0];
+        const downloadUrl = await photo.getDownloadUrl();
+        return res.json({
+          single_photo: true,
+          download_url: downloadUrl,
+          filename: photo.original_name || photo.filename
+        });
+      }
+
+      // Pour plusieurs photos, créer un ZIP
+      const { Readable } = require('stream');
+      
+      // Créer l'archive ZIP
+      const archive = archiver('zip', {
+        zlib: { level: 1 } // Compression rapide
       });
+
+      // Gérer les erreurs de l'archive
+      archive.on('error', (err) => {
+        console.error('Archive error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Archive creation failed' });
+        }
+      });
+
+      // Définir les headers pour le téléchargement
+      const albumTitle = accessiblePhotos[0]?.album_id ? 
+        (await Album.findById(accessiblePhotos[0].album_id))?.title || 'Album' : 'Photos';
+      const zipFilename = `${albumTitle.replace(/[^a-zA-Z0-9]/g, '_')}_photos.zip`;
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+
+      // Pipe l'archive vers la réponse
+      archive.pipe(res);
+
+      // Ajouter chaque photo à l'archive
+      for (let i = 0; i < accessiblePhotos.length; i++) {
+        const photo = accessiblePhotos[i];
+        try {
+          // Télécharger le fichier depuis S3/Minio
+          const { GetObjectCommand } = require('@aws-sdk/client-s3');
+          
+          const command = new GetObjectCommand({
+            Bucket: s3Storage.bucket,
+            Key: photo.file_path,
+          });
+
+          const response = await s3Storage.s3Client.send(command);
+          
+          if (!response.Body) {
+            console.error(`No file data returned for photo ${photo.id}`);
+            continue;
+          }
+
+          // Convertir le stream S3 en Buffer
+          const chunks = [];
+          for await (const chunk of response.Body) {
+            chunks.push(chunk);
+          }
+          const buffer = Buffer.concat(chunks);
+
+          // Générer un nom de fichier unique pour éviter les conflits
+          const fileExtension = photo.filename.split('.').pop();
+          const baseName = photo.original_name || photo.filename.replace(/\.[^/.]+$/, "");
+          const uniqueFilename = `${baseName}_${photo.id.substring(0, 8)}.${fileExtension}`;
+
+          // Ajouter le fichier à l'archive
+          archive.append(buffer, { name: uniqueFilename });
+          
+        } catch (photoError) {
+          console.error(`Error processing photo ${photo.id}:`, photoError);
+          // Continuer avec les autres photos
+        }
+      }
+
+      // Finaliser l'archive
+      await archive.finalize();
 
     } catch (error) {
       console.error('Download multiple photos error:', error);
-      res.status(500).json({ error: 'Server error' });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Server error during download' });
+      }
     }
   }
 };

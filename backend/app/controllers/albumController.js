@@ -1,5 +1,6 @@
 const Album = require('../models/Album');
 const Photo = require('../models/Photo');
+const UserAlbumPermission = require('../models/UserAlbumPermission');
 const { supabase, supabaseAdmin } = require('../config/database');
 
 const albumController = {
@@ -33,12 +34,46 @@ const albumController = {
 
   async getAll(req, res) {
     try {
-      const owner_id = req.user.id;
-      const albums = await Album.findByOwner(owner_id);
+      const user_id = req.user.id;
+      
+      // Get albums owned by the user
+      const ownedAlbums = await Album.findByOwner(user_id);
+      
+      // Get albums user has permission to access
+      const userPermissions = await UserAlbumPermission.findByUser(user_id);
+      
+      // Get the albums from permissions that are not already in owned albums
+      const permissionAlbumIds = userPermissions.map(p => p.album_id);
+      const permissionAlbums = [];
+      
+      for (const albumId of permissionAlbumIds) {
+        // Skip if already owned
+        if (ownedAlbums.find(album => album.id === albumId)) {
+          continue;
+        }
+        
+        try {
+          const album = await Album.findById(albumId);
+          if (album) {
+            // Add permission info to album
+            const userAlbumPermissions = userPermissions.filter(p => p.album_id === albumId);
+            album.user_permissions = userAlbumPermissions.map(p => ({
+              permission_type: p.permission_type,
+              granted_at: p.granted_at,
+              expires_at: p.expires_at,
+              is_active: p.is_active
+            }));
+            permissionAlbums.push(album);
+          }
+        } catch (error) {
+          console.error(`Error fetching album ${albumId}:`, error);
+        }
+      }
+      
+      // Combine owned and permitted albums
+      const allAlbums = [...ownedAlbums, ...permissionAlbums];
 
-      res.json({
-        albums
-      });
+      res.json({ albums: allAlbums });
 
     } catch (error) {
       console.error('Get albums error:', error);
@@ -63,14 +98,15 @@ const albumController = {
   async getById(req, res) {
     try {
       const { id } = req.params;
+      
       const album = await Album.findById(id);
 
       if (!album) {
         return res.status(404).json({ error: 'Album not found' });
       }
 
-      // Check if user has access to this album
-      const hasAccess = album.owner_id === req.user.id || album.is_public;
+      // Check if user has access to this album using advanced permissions
+      const hasAccess = await UserAlbumPermission.hasPermission(req.user.id, id, 'view');
 
       if (!hasAccess) {
         return res.status(403).json({ error: 'Access denied' });
@@ -79,11 +115,15 @@ const albumController = {
       // Get photos for this album
       const photos = await album.getPhotos();
 
+      // Get user's detailed permissions for this album
+      const userPermissions = await UserAlbumPermission.getUserAlbumPermissions(req.user.id, id);
+
       res.json({
         album: {
           ...album,
           photos
-        }
+        },
+        user_permissions: userPermissions
       });
 
     } catch (error) {
@@ -155,10 +195,44 @@ const albumController = {
     }
   },
 
+  async getAlbumUsers(req, res) {
+    try {
+      const { id } = req.params;
+      // Vérifier que l'album existe
+      const album = await Album.findById(id);
+      if (!album) {
+        return res.status(404).json({ error: 'Album not found' });
+      }
+      // Récupérer les permissions utilisateurs pour cet album
+      const permissions = await UserAlbumPermission.findByAlbum(id);
+      // Formater la réponse
+      const users = permissions.map(p => {
+        const userInfo = p.user_info || {};
+        const metaData = userInfo.raw_user_meta_data || {};
+        
+        return {
+          id: userInfo.id || p.user_id,
+          email: userInfo.email || 'unknown@email.com',
+          name: metaData.full_name || metaData.name || userInfo.email?.split('@')[0] || 'Utilisateur',
+          role: metaData.role || 'user',
+          raw_user_meta_data: metaData,
+          permission_type: p.permission_type,
+          granted_at: p.granted_at,
+          expires_at: p.expires_at,
+          is_active: p.is_active
+        };
+      });
+      res.json({ users });
+    } catch (error) {
+      console.error('Get album users error:', error);
+      res.status(500).json({ error: 'Server error' });
+    }
+  },
+
   async update(req, res) {
     try {
       const { id } = req.params;
-      const { title, description, date, tags, location, is_public } = req.body;
+      const { title, description, date, tags, location, is_public, cover_photo_id } = req.body;
 
       const album = await Album.findById(id);
 
@@ -177,6 +251,7 @@ const albumController = {
       if (tags !== undefined) updates.tags = tags;
       if (location !== undefined) updates.location = location;
       if (is_public !== undefined) updates.is_public = is_public;
+      if (cover_photo_id !== undefined) updates.cover_photo_id = cover_photo_id;
 
       const updatedAlbum = await Album.update(id, updates);
 
@@ -191,7 +266,7 @@ const albumController = {
     }
   },
 
-  async delete(req, res) {
+  async deleteAlbum(req, res) {
     try {
       const { id } = req.params;
 
@@ -225,6 +300,42 @@ const albumController = {
 
     } catch (error) {
       console.error('Delete album error:', error);
+      res.status(500).json({ error: 'Server error' });
+    }
+    },
+
+  async setCoverPhoto(req, res) {
+    try {
+      const { id } = req.params;
+      const { cover_photo_id } = req.body;
+
+      const album = await Album.findById(id);
+
+      if (!album) {
+        return res.status(404).json({ error: 'Album not found' });
+      }
+
+      if (album.owner_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      // Vérifier que la photo appartient à cet album si un ID est fourni
+      if (cover_photo_id) {
+        const photo = await Photo.findById(cover_photo_id);
+        if (!photo || photo.album_id !== id) {
+          return res.status(400).json({ error: 'Photo not found in this album' });
+        }
+      }
+
+      const updatedAlbum = await Album.update(id, { cover_photo_id });
+
+      res.json({
+        message: 'Cover photo updated successfully',
+        album: updatedAlbum
+      });
+
+    } catch (error) {
+      console.error('Set cover photo error:', error);
       res.status(500).json({ error: 'Server error' });
     }
   }

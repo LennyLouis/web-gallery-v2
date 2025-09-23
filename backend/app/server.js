@@ -3,12 +3,15 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
+const { specs, swaggerUi, swaggerUiOptions } = require('./config/swagger');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const albumRoutes = require('./routes/albumRoutes');
 const photoRoutes = require('./routes/photoRoutes');
 const accessLinkRoutes = require('./routes/accessLinkRoutes');
+const userAlbumPermissionRoutes = require('./routes/userAlbumPermissionRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
@@ -26,9 +29,24 @@ app.use('/api', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, swaggerUiOptions));
+
+// OpenAPI JSON endpoint
+app.get('/api-docs.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(specs);
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Debug logging middleware
+app.use((req, res, next) => {
+  console.log(`🌐 INCOMING REQUEST: ${req.method} ${req.path}`);
+  next();
 });
 
 // API routes
@@ -36,6 +54,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/albums', albumRoutes);
 app.use('/api/photos', photoRoutes);
 app.use('/api/access-links', accessLinkRoutes);
+app.use('/api/permissions', userAlbumPermissionRoutes);
+app.use('/api/users', userRoutes);
 
 // 404 handler
 app.use((req, res) => {

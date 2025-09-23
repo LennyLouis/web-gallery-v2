@@ -11,6 +11,7 @@ class AccessLink {
     this.created_by = data.created_by;
     this.used_count = data.used_count || 0;
     this.max_uses = data.max_uses;
+    this.permission_type = data.permission_type || 'view'; // 'view' or 'download'
     this.created_at = data.created_at;
     this.updated_at = data.updated_at;
   }
@@ -19,13 +20,25 @@ class AccessLink {
     return crypto.randomBytes(32).toString('hex');
   }
 
+  static validatePermissionType(permissionType) {
+    const validTypes = ['view', 'download'];
+    return validTypes.includes(permissionType);
+  }
+
   static async create(linkData) {
     const token = this.generateToken();
+    
+    // Validate permission_type if provided
+    if (linkData.permission_type && !this.validatePermissionType(linkData.permission_type)) {
+      throw new Error('Invalid permission type. Must be "view" or "download"');
+    }
+
     const dataToInsert = {
       ...linkData,
       token,
       is_active: true,
-      used_count: 0
+      used_count: 0,
+      permission_type: linkData.permission_type || 'view' // Default to 'view'
     };
 
     const { data, error } = await supabase
@@ -86,6 +99,29 @@ class AccessLink {
     if (this.expires_at && new Date(this.expires_at) < new Date()) return false;
     if (this.max_uses && this.used_count >= this.max_uses) return false;
     return true;
+  }
+
+  // Check if the access link allows the requested permission
+  hasPermission(requiredPermission) {
+    if (!this.isValid()) {
+      return false;
+    }
+    
+    // 'download' permission includes 'view' permission
+    if (requiredPermission === 'view') {
+      return true; // Both 'view' and 'download' links allow viewing
+    }
+    
+    if (requiredPermission === 'download') {
+      return this.permission_type === 'download';
+    }
+    
+    return false;
+  }
+
+  // Get permission level as string for display
+  getPermissionLabel() {
+    return this.permission_type === 'download' ? 'Téléchargement' : 'Visualisation';
   }
 
   async getAlbum() {

@@ -1,0 +1,2 @@
+-- Cette migration était vide, la fonctionnalité a été implémentée dans 20250923004749_add_cover_photo_to_albums_fix.sql
+-- Garder ce fichier vide pour éviter les conflits de migration

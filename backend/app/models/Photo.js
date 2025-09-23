@@ -79,7 +79,7 @@ class Photo {
 
   async getPreviewUrl() {
     const s3Storage = require('../utils/s3Storage');
-    return s3Storage.getPublicUrl(this.preview_path); // Public URL pour les previews
+    return await s3Storage.getSignedUrl(this.preview_path, 3600); // URL signée pour les previews aussi
   }
 }
 
