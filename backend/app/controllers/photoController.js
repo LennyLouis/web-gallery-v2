@@ -302,6 +302,19 @@ const photoController = {
         return res.status(403).json({ error: 'No accessible photos found' });
       }
 
+      // Incrémenter le compteur de téléchargements pour chaque album concerné
+      const albumIds = [...new Set(accessiblePhotos.map(photo => photo.album_id))];
+      await Promise.all(
+        albumIds.map(async (albumId) => {
+          try {
+            await Album.incrementDownloadCount(albumId);
+            console.log(`📊 Incremented download count for album ${albumId}`);
+          } catch (error) {
+            console.warn(`Failed to increment download count for album ${albumId}:`, error);
+          }
+        })
+      );
+
       // Si c'est une seule photo, faire un téléchargement direct
       if (accessiblePhotos.length === 1) {
         const photo = accessiblePhotos[0];

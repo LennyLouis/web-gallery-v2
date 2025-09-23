@@ -20,6 +20,7 @@ export interface Album {
   created_at: string;
   updated_at: string;
   photo_count?: number;
+  download_count?: number;
 }
 
 export interface AccessLink {

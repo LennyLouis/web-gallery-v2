@@ -27,6 +27,7 @@ export type Album = {
   updated_at: string;
   photo_count?: number;
   cover_photo_url?: string;
+  download_count?: number;
 };
 
 export type Photo = {

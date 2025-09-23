@@ -116,6 +116,47 @@ router.get('/', albumController.getAll);
 
 /**
  * @swagger
+ * /api/albums/stats:
+ *   get:
+ *     summary: Get album statistics (admin only)
+ *     operationId: getAlbumStats
+ *     tags: [Albums]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Album statistics and data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 stats:
+ *                   type: object
+ *                   properties:
+ *                     total_albums:
+ *                       type: integer
+ *                     public_albums:
+ *                       type: integer
+ *                     private_albums:
+ *                       type: integer
+ *                     total_downloads:
+ *                       type: integer
+ *                     top_albums:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Album'
+ *                 albums:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Album'
+ *       403:
+ *         description: Admin access required
+ */
+router.get('/stats', albumController.getStats);
+
+/**
+ * @swagger
  * /api/albums/{id}:
  *   get:
  *     summary: Get album by ID

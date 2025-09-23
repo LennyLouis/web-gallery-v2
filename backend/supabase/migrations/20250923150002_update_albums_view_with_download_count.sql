@@ -1,10 +1,9 @@
--- Fix albums_with_photo_count view to include cover_photo_id
--- The view was created before the cover_photo_id column was added
+-- Migration: Update albums_with_photo_count view to include download_count
+-- Description: Add download_count to the albums view after adding the column
 
--- Drop the existing view to avoid column order conflicts
+-- Drop and recreate the view to include download_count
 DROP VIEW IF EXISTS albums_with_photo_count;
 
--- Recreate the view with all columns including cover_photo_id
 CREATE VIEW albums_with_photo_count AS
 SELECT
     a.id,
@@ -15,7 +14,8 @@ SELECT
     a.location,
     a.is_public,
     a.owner_id,
-    a.cover_photo_id,  -- Explicitly include cover_photo_id
+    a.cover_photo_id,
+    a.download_count,  -- Include the new download_count column
     a.created_at,
     a.updated_at,
     COALESCE(p.photo_count, 0) as photo_count

@@ -11,6 +11,7 @@ class Album {
     this.is_public = data.is_public || false;
     this.owner_id = data.owner_id;
     this.cover_photo_id = data.cover_photo_id || null; // Cover photo ID
+    this.download_count = data.download_count || 0; // Download counter
     this.created_at = data.created_at;
     this.updated_at = data.updated_at;
     this.photo_count = data.photo_count || 0; // Add photo_count support
@@ -149,6 +150,39 @@ class Album {
 
     if (error) throw error;
     return true;
+  }
+
+  // Increment download count for this album
+  static async incrementDownloadCount(id) {
+    // Use the PostgreSQL function directly
+    const { data, error } = await supabaseAdmin
+      .rpc('increment_album_download_count', { album_id: id });
+    
+    if (error) {
+      console.error('Error with RPC increment:', error);
+      // Fallback: read current value and increment
+      const { data: currentAlbum, error: readError } = await supabaseAdmin
+        .from('albums')
+        .select('download_count')
+        .eq('id', id)
+        .single();
+        
+      if (!readError && currentAlbum) {
+        const { error: updateError } = await supabaseAdmin
+          .from('albums')
+          .update({ download_count: (currentAlbum.download_count || 0) + 1 })
+          .eq('id', id);
+        
+        if (updateError) {
+          console.error('Error with manual increment:', updateError);
+          throw updateError;
+        }
+        return (currentAlbum.download_count || 0) + 1;
+      }
+      throw error;
+    }
+    
+    return data;
   }
 
   async getPhotos() {

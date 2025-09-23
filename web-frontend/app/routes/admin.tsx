@@ -15,12 +15,15 @@ export function meta({}: Route.MetaArgs) {
 
 export default function AdminPage() {
   const navigate = useNavigate();
-  const { user, logout, loading: authLoading } = useAuth();
+  const { user, session, logout, loading: authLoading } = useAuth();
   const [error, setError] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // Utiliser notre hook optimisé pour les albums
-  const { albums, loading: albumsLoading, error: albumsError, refetch } = useAlbums();
+  // Utiliser notre hook optimisé pour les albums avec le token de session
+  const { albums, loading: albumsLoading, error: albumsError, refetch } = useAlbums(
+    session?.access_token,
+    { enabled: !!session?.access_token }
+  );
 
   const loading = albumsLoading;
 
@@ -200,6 +203,7 @@ export default function AdminPage() {
                         <tr>
                           <th className="border-0 fw-bold">Album</th>
                           <th className="border-0 fw-bold">Photos</th>
+                          <th className="border-0 fw-bold">Téléchargements</th>
                           <th className="border-0 fw-bold">Visibilité</th>
                           <th className="border-0 fw-bold">Date</th>
                           <th className="border-0 fw-bold">Créé le</th>
@@ -247,6 +251,14 @@ export default function AdminPage() {
                               <Badge bg="light" text="dark">
                                 {album.photo_count || 0} photo{(album.photo_count || 0) > 1 ? 's' : ''}
                               </Badge>
+                            </td>
+                            <td className="py-3" onClick={() => handleAlbumClick(album.id)}>
+                              <div className="d-flex align-items-center">
+                                <span className="me-1">📥</span>
+                                <Badge bg="info" text="white">
+                                  {album.download_count || 0}
+                                </Badge>
+                              </div>
                             </td>
                             <td className="py-3" onClick={() => handleAlbumClick(album.id)}>
                               {album.is_public ? (

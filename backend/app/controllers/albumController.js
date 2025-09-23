@@ -342,6 +342,63 @@ const albumController = {
       console.error('Set cover photo error:', error);
       res.status(500).json({ error: 'Server error' });
     }
+  },
+
+  // Get album statistics for admin interface
+  async getStats(req, res) {
+    try {
+      const user_id = req.user.id;
+      const userRole = req.user.role;
+
+      // Only admin can access statistics
+      if (userRole !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+
+      // Get all albums with download stats
+      const { data: albums, error } = await supabase
+        .from('albums')
+        .select(`
+          id,
+          title,
+          owner_id,
+          is_public,
+          download_count,
+          created_at,
+          updated_at
+        `)
+        .order('download_count', { ascending: false });
+
+      if (error) throw error;
+
+      // Calculate total stats
+      const totalDownloads = albums.reduce((sum, album) => sum + (album.download_count || 0), 0);
+      const publicAlbums = albums.filter(album => album.is_public).length;
+      const privateAlbums = albums.length - publicAlbums;
+
+      // Get most downloaded albums (top 10)
+      const topAlbums = albums
+        .filter(album => album.download_count > 0)
+        .slice(0, 10);
+
+      res.json({
+        stats: {
+          total_albums: albums.length,
+          public_albums: publicAlbums,
+          private_albums: privateAlbums,
+          total_downloads: totalDownloads,
+          top_albums: topAlbums
+        },
+        albums: albums.map(album => ({
+          ...album,
+          download_count: album.download_count || 0
+        }))
+      });
+
+    } catch (error) {
+      console.error('Get album stats error:', error);
+      res.status(500).json({ error: 'Server error' });
+    }
   }
 };
 
