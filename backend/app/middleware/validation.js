@@ -2,7 +2,7 @@ const Joi = require('joi');
 
 const validateRequest = (schema) => {
   return (req, res, next) => {
-    console.log(`🔍 VALIDATION: Validating request body:`, req.body);
+    console.log(`🔍 NEW CONNECTION`);
     const { error } = schema.validate(req.body);
 
     if (error) {
