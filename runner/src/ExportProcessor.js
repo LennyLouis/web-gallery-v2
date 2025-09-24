@@ -21,12 +21,12 @@ class ExportProcessor {
   async processNextBatch() {
     try {
       // Fetch pending exports from database
-      const pendingExports = await this.supabase
+      const pendingExports = await supabase
         .from('album_exports')
         .select('*')
         .eq('status', 'queued')
         .order('created_at', { ascending: true })
-        .limit(this.config.maxConcurrentJobs);
+        .limit(config.maxConcurrentJobs);
 
       if (!pendingExports.data || pendingExports.data.length === 0) {
         return;

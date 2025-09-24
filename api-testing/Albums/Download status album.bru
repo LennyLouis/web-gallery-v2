@@ -1,0 +1,32 @@
+meta {
+  name: Download status album
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{apiUrl}}/albums/33eea1cb-d01f-43ce-8581-f3a407a7385c/exports/59068ad2-1705-4027-9b4f-04edbcf59e8d/status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("should return album with photos", function() {
+    expect(res.getBody().album).to.be.an('object');
+    expect(res.getBody().album.photos).to.be.an('array');
+  });
+  
+  test("should match created album", function() {
+    const album = res.getBody().album;
+    expect(album.title).to.equal('Mon Premier Album');
+    expect(album.location).to.equal('Paris, France');
+  });
+}
