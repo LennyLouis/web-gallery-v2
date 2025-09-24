@@ -212,7 +212,9 @@ class UserAlbumPermission {
 
   // Check if user has specific permission on album
   static async hasPermission(userId, albumId, permissionType = 'view') {
-    console.log(`🔐 CHECKING PERMISSION: User ${userId} -> Album ${albumId} (${permissionType})`);
+    // Reduced verbose logging (toggle with env var if needed)
+    const verbose = process.env.PERMISSION_VERBOSE === 'true';
+    if (verbose) console.log(`🔐 CHECKING PERMISSION: User ${userId} -> Album ${albumId} (${permissionType})`);
     
     try {
       // First check if user is the owner (owners have all permissions)
@@ -220,13 +222,13 @@ class UserAlbumPermission {
       const album = await Album.findById(albumId);
       
       if (album && album.owner_id === userId) {
-        console.log(`✅ PERMISSION GRANTED: User is album owner`);
+        if (verbose) console.log(`✅ PERMISSION GRANTED: User is album owner`);
         return true;
       }
       
       // Check if album is public and permission is 'view'
       if (album && album.is_public && permissionType === 'view') {
-        console.log(`✅ PERMISSION GRANTED: Album is public and permission is view`);
+        if (verbose) console.log(`✅ PERMISSION GRANTED: Album is public and permission is view`);
         return true;
       }
       
@@ -238,7 +240,7 @@ class UserAlbumPermission {
       };
       
       const acceptablePermissions = permissionHierarchy[permissionType] || [permissionType];
-      console.log(`🔍 Looking for permissions: ${acceptablePermissions.join(', ')}`);
+  if (verbose) console.log(`🔍 Looking for permissions: ${acceptablePermissions.join(', ')}`);
       
       // Check explicit permissions in database
       const { data: permissions, error } = await supabaseAdmin
@@ -254,7 +256,7 @@ class UserAlbumPermission {
         throw error;
       }
       
-      console.log(`🔍 Found ${permissions.length} permissions in database:`, permissions.map(p => p.permission_type));
+  if (verbose) console.log(`🔍 Found ${permissions.length} permissions in database:`, permissions.map(p => p.permission_type));
       
       // Check if any valid permission exists
       const validPermissions = permissions.filter(p => {
@@ -263,9 +265,9 @@ class UserAlbumPermission {
       });
       
       const hasValidPermission = validPermissions.length > 0;
-      console.log(`${hasValidPermission ? '✅' : '❌'} PERMISSION CHECK: Found ${validPermissions.length} valid permissions`);
+  if (verbose) console.log(`${hasValidPermission ? '✅' : '❌'} PERMISSION CHECK: Found ${validPermissions.length} valid permissions`);
       
-      if (hasValidPermission) {
+      if (hasValidPermission && verbose) {
         console.log(`✅ Valid permissions found:`, validPermissions.map(p => `${p.permission_type} (expires: ${p.expires_at || 'never'})`));
       }
       

@@ -58,6 +58,21 @@ const config = {
       region: process.env.S3_REGION,
       forcePathStyle: true // Required for Minio
     }
+  },
+  exports: {
+    progressUpdateIntervalMs: parseInt(process.env.EXPORT_PROGRESS_INTERVAL_MS || '1000', 10),
+    maxPhotosPerExport: parseInt(process.env.EXPORT_MAX_PHOTOS || '5000', 10),
+    maxTotalBytes: parseInt(process.env.EXPORT_MAX_TOTAL_BYTES || (6 * 1024 * 1024 * 1024).toString(), 10),
+    // Streaming configuration for better performance with large exports
+    concurrentDownloads: parseInt(process.env.EXPORT_CONCURRENT_DOWNLOADS || '5', 10),
+    batchSize: parseInt(process.env.EXPORT_BATCH_SIZE || '10', 10),
+    streamTimeout: parseInt(process.env.EXPORT_STREAM_TIMEOUT_MS || '30000', 10),
+    maxRetries: parseInt(process.env.EXPORT_MAX_RETRIES || '3', 10),
+    cleanup: {
+      enabled: (process.env.EXPORT_CLEANUP_ENABLED || 'true') === 'true',
+      ttlHours: parseInt(process.env.EXPORT_CLEANUP_TTL_HOURS || '72', 10),
+      intervalMinutes: parseInt(process.env.EXPORT_CLEANUP_INTERVAL_MINUTES || '60', 10)
+    }
   }
 };
 

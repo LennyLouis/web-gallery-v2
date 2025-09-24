@@ -15,6 +15,7 @@
   "description": "Backend API for Web Gallery application",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.658.1",
+    "@aws-sdk/lib-storage": "^3.895.0",
     "@aws-sdk/s3-request-presigner": "^3.658.1",
     "@supabase/supabase-js": "^2.45.4",
     "@types/swagger-jsdoc": "^6.0.4",

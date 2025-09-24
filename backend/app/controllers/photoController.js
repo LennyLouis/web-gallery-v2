@@ -1,5 +1,6 @@
 const Photo = require('../models/Photo');
 const Album = require('../models/Album');
+const AlbumExport = require('../models/AlbumExport');
 const UserAlbumPermission = require('../models/UserAlbumPermission');
 const { supabase, supabaseAdmin } = require('../config/database');
 const s3Storage = require('../utils/s3Storage');
@@ -257,10 +258,6 @@ const photoController = {
       if (!Array.isArray(photoIds) || photoIds.length === 0) {
         return res.status(400).json({ error: 'Photo IDs array required' });
       }
-
-      if (photoIds.length > 50) {
-        return res.status(400).json({ error: 'Maximum 50 photos per download' });
-      }
       
       const photos = await Promise.all(
         photoIds.map(async id => {
@@ -279,33 +276,67 @@ const photoController = {
         return res.status(404).json({ error: 'No valid photos found' });
       }
 
-      // Vérifier l'accès pour chaque photo
-      const accessiblePhotos = [];
+      // OPTIMISATION: Vérifier l'accès par album au lieu de photo par photo
+      const albumIds = [...new Set(validPhotos.map(photo => photo.album_id))];
+      const accessibleAlbums = new Set();
 
-      for (const photo of validPhotos) {
+      console.log(`🔐 Checking permissions for ${albumIds.length} albums instead of ${validPhotos.length} photos`);
+
+      for (const albumId of albumIds) {
         let hasAccess = false;
         
         if (req.accessLink) {
-          // Mode access token : vérifier que la photo appartient à l'album du lien d'accès
-          hasAccess = (photo.album_id === req.accessLink.album_id);
+          // Mode access token : vérifier que l'album correspond au lien d'accès
+          hasAccess = (albumId === req.accessLink.album_id);
         } else if (req.user) {
           // Mode utilisateur authentifié : vérifier les permissions utilisateur
-          hasAccess = await UserAlbumPermission.hasPermission(req.user.id, photo.album_id, 'download');
+          hasAccess = await UserAlbumPermission.hasPermission(req.user.id, albumId, 'download');
+          if (hasAccess) {
+            console.log(`✅ PERMISSION GRANTED: User ${req.user.id} -> Album ${albumId} (download)`);
+          }
         }
         
         if (hasAccess) {
-          accessiblePhotos.push(photo);
+          accessibleAlbums.add(albumId);
         }
       }
+
+      // Filtrer les photos par albums accessibles
+      const accessiblePhotos = validPhotos.filter(photo => accessibleAlbums.has(photo.album_id));
 
       if (accessiblePhotos.length === 0) {
         return res.status(403).json({ error: 'No accessible photos found' });
       }
 
-      // Incrémenter le compteur de téléchargements pour chaque album concerné
-      const albumIds = [...new Set(accessiblePhotos.map(photo => photo.album_id))];
+      console.log(`📊 Access check: ${accessiblePhotos.length}/${validPhotos.length} photos accessible`);
+
+      // Test de connectivité S3 sur la première photo
+      if (accessiblePhotos.length > 0) {
+        try {
+          const testPhoto = accessiblePhotos[0];
+          const testS3Key = s3Storage.getPhotoPath(testPhoto.album_id, testPhoto.filename);
+          console.log(`🧪 Testing S3 connectivity with: ${testS3Key}`);
+          
+          const { HeadObjectCommand } = require('@aws-sdk/client-s3');
+          const headCommand = new HeadObjectCommand({ 
+            Bucket: s3Storage.bucket, 
+            Key: testS3Key 
+          });
+          
+          const headResponse = await s3Storage.s3Client.send(headCommand);
+          console.log(`✅ S3 connectivity OK - Size: ${headResponse.ContentLength} bytes, Type: ${headResponse.ContentType}`);
+        } catch (s3Error) {
+          console.error(`❌ S3 connectivity test failed:`, s3Error.message);
+          return res.status(500).json({ 
+            error: 'Storage connectivity issue', 
+            details: s3Error.message 
+          });
+        }
+      }
+
+      // Incrémenter le compteur de téléchargements pour chaque album accessible
       await Promise.all(
-        albumIds.map(async (albumId) => {
+        Array.from(accessibleAlbums).map(async (albumId) => {
           try {
             await Album.incrementDownloadCount(albumId);
             console.log(`📊 Incremented download count for album ${albumId}`);
@@ -368,7 +399,61 @@ const photoController = {
         }
       }
 
-      // Pour plusieurs photos, créer un ZIP
+      // Pour plusieurs photos, si la sélection dépasse un seuil configurable, lancer un export async
+      const DIRECT_ZIP_MAX = parseInt(process.env.DIRECT_ZIP_MAX_PHOTOS || '10', 10); // Réduit de 30 à 10
+      const MAX_MEMORY_MB = parseInt(process.env.DIRECT_ZIP_MAX_MEMORY_MB || '500', 10); // 500MB max en mémoire
+      
+      // Estimer la taille totale (approximation : 4MB par photo en moyenne)
+      const estimatedSizeMB = accessiblePhotos.length * 4;
+      
+      if (accessiblePhotos.length > DIRECT_ZIP_MAX || estimatedSizeMB > MAX_MEMORY_MB) {
+        console.log(`📊 Large download detected: ${accessiblePhotos.length} photos (~${estimatedSizeMB}MB) - Using async export`);
+        
+        // Utiliser la nouvelle architecture avec runner séparé
+        try {
+          // Regrouper par album? Simplification: supposons toutes du même album pour un ZIP direct; sinon on refuse
+          const involvedAlbumIds = [...new Set(accessiblePhotos.map(p => p.album_id))];
+          if (involvedAlbumIds.length > 1) {
+            return res.status(400).json({ error: 'Async export currently supports photos from a single album at a time' });
+          }
+          
+          const albumId = involvedAlbumIds[0];
+          
+          // Calculer la taille estimée
+          const estimatedTotalBytes = accessiblePhotos.reduce((sum, photo) => sum + (photo.file_size || 4 * 1024 * 1024), 0);
+          
+          const exportRow = await AlbumExport.createForRunner({ 
+            albumId, 
+            photoIds: accessiblePhotos.map(p => p.id), 
+            userId: req.user?.id,
+            totalPhotos: accessiblePhotos.length,
+            totalBytes: estimatedTotalBytes
+          });
+          
+          return res.status(202).json({
+            mode: 'async',
+            message: 'Export job created - processing by runner service',
+            export: { 
+              id: exportRow.id, 
+              status: exportRow.status, 
+              percent: 0,
+              album_id: exportRow.album_id,
+              total_photos: exportRow.total_photos,
+              total_bytes: exportRow.total_bytes
+            }
+          });
+          
+        } catch (e) {
+          console.error('Runner-based export creation failed:', e.message);
+          
+          return res.status(500).json({
+            error: 'Failed to create export job',
+            details: e.message
+          });
+        }
+      }
+
+      // Pour plusieurs photos (petit volume), créer un ZIP direct
       console.log(`📦 Creating ZIP archive for ${accessiblePhotos.length} photos`);
       
       // Créer l'archive ZIP
@@ -378,14 +463,22 @@ const photoController = {
 
       // Gérer les erreurs de l'archive
       archive.on('error', (err) => {
-        console.error('Archive error:', err);
+        console.error('❌ Archive error:', err);
         if (!res.headersSent) {
           res.status(500).json({ error: 'Archive creation failed' });
         }
       });
 
       archive.on('warning', (err) => {
-        console.warn('Archive warning:', err);
+        console.warn('⚠️ Archive warning:', err);
+      });
+
+      archive.on('progress', (progress) => {
+        console.log(`📦 Archive progress: ${progress.entries.processed}/${progress.entries.total} entries`);
+      });
+
+      archive.on('entry', (entry) => {
+        console.log(`📁 Added to archive: ${entry.name} (${entry.stats.size} bytes)`);
       });
 
       // Définir les headers pour le téléchargement
@@ -399,68 +492,119 @@ const photoController = {
       // Pipe l'archive vers la réponse
       archive.pipe(res);
 
-      // Ajouter chaque photo à l'archive
+      // Ajouter chaque photo à l'archive de manière séquentielle
+      let successCount = 0;
+      let errorCount = 0;
+      
       for (let i = 0; i < accessiblePhotos.length; i++) {
         const photo = accessiblePhotos[i];
         console.log(`📦 Processing photo ${i + 1}/${accessiblePhotos.length}: ${photo.filename}`);
         
         try {
-          // Utiliser la même méthode que pour le téléchargement direct
           const s3Key = s3Storage.getPhotoPath(photo.album_id, photo.filename);
-          console.log(`📦 S3 Key: ${s3Key}`);
+          console.log(`🔑 S3 Key: ${s3Key}`);
           
-          const command = new GetObjectCommand({
-            Bucket: s3Storage.bucket,
-            Key: s3Key,
+          const command = new GetObjectCommand({ 
+            Bucket: s3Storage.bucket, 
+            Key: s3Key 
           });
-
+          
+          console.log(`⬇️ Downloading from S3: ${s3Key}`);
           const response = await s3Storage.s3Client.send(command);
           
           if (!response.Body) {
-            console.error(`No file data returned for photo ${photo.id}`);
-            continue;
+            throw new Error('No response body from S3');
           }
-
-          console.log(`📦 Photo ${photo.filename} - Size: ${response.ContentLength} bytes`);
-
-          // Convertir le stream AWS SDK v3 en Buffer
-          const { Readable } = require('stream');
-          let bodyStream;
           
-          if (response.Body instanceof Readable) {
-            bodyStream = response.Body;
-          } else {
-            // Pour AWS SDK v3, convertir le ReadableStream web en Node.js stream
+          console.log(`📊 Content Length: ${response.ContentLength} bytes, Content Type: ${response.ContentType}`);
+          
+          // Au lieu d'utiliser des streams, lire tout le contenu en mémoire pour éviter la corruption
+          const chunks = [];
+          const { Readable } = require('stream');
+          
+          let bodyStream = response.Body;
+          if (!(bodyStream instanceof Readable)) {
+            console.log('🔄 Converting Web Stream to Node Stream');
             bodyStream = Readable.fromWeb(response.Body);
           }
-
-          const chunks = [];
-          for await (const chunk of bodyStream) {
-            chunks.push(chunk);
-          }
-          const buffer = Buffer.concat(chunks);
           
-          console.log(`📦 Photo ${photo.filename} - Buffer size: ${buffer.length} bytes`);
-
-          // Générer un nom de fichier unique pour éviter les conflits
+          // Lire tout le stream en mémoire
+          await new Promise((resolve, reject) => {
+            let totalBytes = 0;
+            
+            bodyStream.on('data', (chunk) => {
+              chunks.push(chunk);
+              totalBytes += chunk.length;
+            });
+            
+            bodyStream.on('end', () => {
+              console.log(`📥 Downloaded ${totalBytes} bytes for ${photo.filename}`);
+              resolve();
+            });
+            
+            bodyStream.on('error', (err) => {
+              console.error(`❌ Stream error for ${photo.filename}:`, err);
+              reject(err);
+            });
+            
+            // Timeout de sécurité
+            setTimeout(() => {
+              reject(new Error(`Timeout downloading ${photo.filename}`));
+            }, 30000);
+          });
+          
+          // Combiner tous les chunks
+          const completeBuffer = Buffer.concat(chunks);
+          console.log(`🔗 Combined buffer size: ${completeBuffer.length} bytes`);
+          
           const fileExtension = photo.filename.split('.').pop();
-          const baseName = photo.original_name || photo.filename.replace(/\.[^/.]+$/, "");
-          const uniqueFilename = `${baseName}_${photo.id.substring(0, 8)}.${fileExtension}`;
-
-          // Ajouter le fichier à l'archive
-          archive.append(buffer, { name: uniqueFilename });
-          console.log(`📦 Added ${uniqueFilename} to archive`);
+          const baseName = (photo.original_name || photo.filename).replace(/\.[^/.]+$/, '');
+          const uniqueFilename = `${baseName}_${photo.id.substring(0,8)}.${fileExtension}`;
           
-        } catch (photoError) {
-          console.error(`Error processing photo ${photo.id}:`, photoError);
-          // Continuer avec les autres photos
+          console.log(`📁 Adding to archive as: ${uniqueFilename} (${completeBuffer.length} bytes)`);
+          
+          // Ajouter le buffer à l'archive (plus fiable que les streams)
+          archive.append(completeBuffer, { 
+            name: uniqueFilename
+          });
+          
+          successCount++;
+          console.log(`✅ Successfully added: ${uniqueFilename}`);
+          
+        } catch (err) {
+          errorCount++;
+          console.error(`❌ Failed to process ${photo.id} (${photo.filename}):`, err.message);
+          
+          // Ajouter un fichier d'erreur au ZIP pour indiquer le problème
+          const errorContent = `Error downloading ${photo.filename}: ${err.message}`;
+          archive.append(errorContent, { name: `ERROR_${photo.filename}.txt` });
         }
       }
 
+      console.log(`📊 Archive processing complete: ${successCount} success, ${errorCount} errors`);
+
       // Finaliser l'archive
       console.log(`📦 Finalizing archive...`);
-      await archive.finalize();
-      console.log(`📦 Archive finalized successfully`);
+      
+      const finalizePromise = new Promise((resolve, reject) => {
+        archive.on('end', () => {
+          console.log(`✅ Archive finalized successfully - Total bytes: ${archive.pointer()}`);
+          resolve();
+        });
+        
+        archive.on('error', (err) => {
+          console.error(`❌ Archive finalization error:`, err);
+          reject(err);
+        });
+        
+        // Timeout de sécurité
+        setTimeout(() => {
+          reject(new Error('Archive finalization timeout'));
+        }, 60000); // 1 minute
+      });
+      
+      archive.finalize();
+      await finalizePromise;
 
     } catch (error) {
       console.error('Download multiple photos error:', error);

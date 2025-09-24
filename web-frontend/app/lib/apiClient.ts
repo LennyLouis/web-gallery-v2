@@ -358,6 +358,30 @@ class ApiClient {
   async deletePermission(permissionId: string, token: string): Promise<void> {
     await this.client.delete(`/api/permissions/${permissionId}`, this.createAuthConfig(token));
   }
+
+  // Album export (async ZIP) endpoints
+  async createAlbumExport(albumId: string, token: string, photoIds?: string[], all: boolean = false): Promise<{ export: any }> {
+    const body: any = {};
+    if (all) body.all = true; else if (photoIds && photoIds.length) body.photoIds = photoIds;
+    const response = await this.client.post(`/api/albums/${albumId}/exports`, body, this.createAuthConfig(token));
+    return response.data;
+  }
+
+  async getAlbumExportStatus(albumId: string, exportId: string, token: string): Promise<{ export: any }> {
+    const response = await this.client.get(`/api/albums/${albumId}/exports/${exportId}/status`, this.createAuthConfig(token));
+    return response.data;
+  }
+
+  async downloadAlbumExport(albumId: string, exportId: string, token: string): Promise<void> {
+    const response = await this.client.get(`/api/albums/${albumId}/exports/${exportId}/download`, this.createAuthConfig(token));
+    const { download_url } = response.data;
+    const a = document.createElement('a');
+    a.href = download_url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 }
 
 export const apiClient = new ApiClient();

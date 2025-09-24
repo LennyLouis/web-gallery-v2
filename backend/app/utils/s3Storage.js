@@ -50,6 +50,46 @@ class S3Storage {
     }
   }
 
+  // Uploader un stream (pour les gros fichiers/archives)
+  async uploadStream(stream, key, contentType = 'application/octet-stream') {
+    try {
+      const { Upload } = require('@aws-sdk/lib-storage');
+      
+      const upload = new Upload({
+        client: this.s3Client,
+        params: {
+          Bucket: this.bucket,
+          Key: key,
+          Body: stream,
+          ContentType: contentType,
+        },
+        // Configuration optimisée pour les gros fichiers
+        partSize: 10 * 1024 * 1024, // 10MB parts
+        queueSize: 4, // 4 uploads simultanés
+        leavePartsOnError: false,
+      });
+
+      // Gestion du progress (optionnel)
+      upload.on('httpUploadProgress', (progress) => {
+        if (progress.total) {
+          const percent = Math.round((progress.loaded / progress.total) * 100);
+          console.log(`📤 Upload progress for ${key}: ${percent}% (${progress.loaded}/${progress.total} bytes)`);
+        }
+      });
+
+      const result = await upload.done();
+
+      return {
+        key,
+        url: result.Location || `${config.storage.s3.endpoint}/${this.bucket}/${key}`,
+        etag: result.ETag
+      };
+    } catch (error) {
+      console.error('S3 Stream upload error:', error);
+      throw new Error(`Failed to upload stream: ${error.message}`);
+    }
+  }
+
   // Supprimer un fichier
   async deleteFile(key) {
     try {
