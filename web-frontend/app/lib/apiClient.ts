@@ -69,7 +69,7 @@ class ApiClient {
   private onTokenExpired?: () => void;
 
   constructor() {
-    const apiUrl = import.meta.env?.VITE_API_URL;
+    const apiUrl = import.meta.env.VITE_API_URL;
 
     this.client = axios.create({
       baseURL: apiUrl,
@@ -126,7 +126,17 @@ class ApiClient {
   // Albums endpoints
   async getAlbums(token: string): Promise<{ albums: Album[] }> {
     const response = await this.client.get('/api/albums', this.createAuthConfig(token));
-    return response.data;
+    
+    console.log('📡 ApiClient: Albums response:', {
+      status: response.status,
+      dataKeys: Object.keys(response.data || {}),
+      albumsCount: response.data?.albums?.length || 0
+    });
+    
+    // Ensure we always return albums array
+    return {
+      albums: response.data?.albums || []
+    };
   }
 
   async getAlbum(albumId: string, token: string): Promise<{ album: Album }> {

@@ -23,7 +23,10 @@ export function useAlbums(token?: string, options: UseAlbumsOptions = {}) {
   const cacheKey = createCacheKey('albums', token || 'default');
 
   const fetchAlbums = useCallback(async (force = false) => {
-    if (!enabled || !token || !mountedRef.current) return;
+    if (!enabled || !token || !mountedRef.current) {
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
@@ -40,11 +43,13 @@ export function useAlbums(token?: string, options: UseAlbumsOptions = {}) {
 
       if (mountedRef.current) {
         setAlbums(result);
+        setError('');
       }
     } catch (err: any) {
-      console.error('Load albums error:', err);
+      console.error('❌ useAlbums: Error fetching albums:', err);
       if (mountedRef.current) {
-        setError('Erreur lors du chargement des albums');
+        setError(err.message || 'Erreur lors du chargement des albums');
+        setAlbums([]);
       }
     } finally {
       if (mountedRef.current) {
@@ -58,6 +63,10 @@ export function useAlbums(token?: string, options: UseAlbumsOptions = {}) {
     globalCache.albums.invalidate(cacheKey);
     fetchAlbums(true);
   }, [cacheKey, fetchAlbums]);
+
+  const refetch = useCallback(() => {
+    return fetchAlbums(true);
+  }, [fetchAlbums]);
 
   // Charger les albums au montage
   useEffect(() => {
@@ -89,6 +98,7 @@ export function useAlbums(token?: string, options: UseAlbumsOptions = {}) {
 
   // Cleanup à la désactivation
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -98,7 +108,7 @@ export function useAlbums(token?: string, options: UseAlbumsOptions = {}) {
     albums,
     loading,
     error,
-    refetch: () => fetchAlbums(true),
+    refetch,
     invalidateCache
   };
 }

@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // Pour React Router v7 SPA mode, nous utilisons import.meta.env
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-  
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export type User = {
@@ -195,19 +195,25 @@ export const api = {
   },
 
   // Albums endpoints
-  async getAlbums(accessToken?: string): Promise<{ albums: Album[] }> {
-    let token = accessToken;
+  async getAlbums(accessToken?: string): Promise<{ albums: Album[] }> {    
+    try {
+      let token = accessToken;
 
-    if (!token) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('No active session');
+      if (!token) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error('No active session');
+        }
+        token = session.access_token;
       }
-      token = session.access_token;
-    }
 
-    const data = await apiClient.getAlbums(token);
-    return { albums: data.albums || [] };
+      const data = await apiClient.getAlbums(token);
+            
+      return { albums: data.albums || [] };
+    } catch (error) {
+      console.error('❌ Supabase API: Error in getAlbums:', error);
+      throw error;
+    }
   },
 
   async getAlbum(id: string, accessToken?: string): Promise<{ album: Album }> {

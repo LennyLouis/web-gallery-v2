@@ -22,8 +22,8 @@ export default function Dashboard() {
     session?.access_token, 
     {
       enabled: !!user && !!session && isSessionValid(),
-      refetchOnWindowFocus: false, // Désactiver le refetch automatique au focus
-      staleTime: 10 * 60 * 1000 // Cache de 10 minutes
+      refetchOnWindowFocus: false,
+      staleTime: 10 * 60 * 1000
     }
   );
 
@@ -45,17 +45,18 @@ export default function Dashboard() {
 
   // Memoize loading state pour éviter re-renders inutiles
   const loading = useMemo(() => {
-    return authLoading || albumsLoading;
+    const result = authLoading || albumsLoading;
+    return result;
   }, [authLoading, albumsLoading]);
 
-  // Ne pas afficher le dashboard si l'auth n'est pas encore chargée ou si pas d'utilisateur
+  // Ne pas afficher le dashboard si l'auth n'est pas encore chargée
   if (authLoading) {
     return (
       <div className="web-gallery">
         <Container className="py-5">
           <div className="text-center">
             <Spinner animation="border" style={{color: 'var(--bs-primary)'}} />
-            <p className="mt-3 text-muted">Chargement...</p>
+            <p className="mt-3 text-muted">Chargement de l'authentification...</p>
           </div>
         </Container>
       </div>
